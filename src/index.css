@@ -1,0 +1,50 @@
+:root {
+  --paper: #f6f0e4;
+  --paper-shadow: #ebe2d2;
+  --ink: #1f2122;
+  --ink-muted: #625d55;
+  --ink-faint: rgba(31, 33, 34, 0.18);
+  --gear-below: #b5aea1;
+  --gear-above-opacity: 0.16;
+  --signal-good: #4d8751;
+  --signal-bad: #be3726;
+  --signal-neutral: #1f2122;
+
+  font-family:
+    'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Baskerville, Georgia,
+    serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.45), transparent 30%),
+    var(--paper-shadow);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+svg {
+  user-select: none;
+}
