@@ -277,7 +277,6 @@ function GearGlyph({
       data-testid={`gear-${gear.id}`}
       onPointerDown={onPointerDown}
       opacity={isDraft ? 1 : style.opacity}
-      pointerEvents={pointerEvents}
       transform={`rotate(${angle} ${gear.center.x} ${gear.center.y})`}
     >
       {canRenderWindows ? (
@@ -286,6 +285,7 @@ function GearGlyph({
             d={rimRingPath}
             fill={fill}
             fillRule="evenodd"
+            pointerEvents="none"
             stroke={stroke}
             strokeLinejoin="round"
             strokeWidth={2}
@@ -303,6 +303,7 @@ function GearGlyph({
                   armWidth,
                 )}
                 fill={fill}
+                pointerEvents="none"
                 stroke={stroke}
                 strokeLinejoin="round"
                 strokeWidth={1.4}
@@ -313,6 +314,7 @@ function GearGlyph({
             d={hubRingPath}
             fill={fill}
             fillRule="evenodd"
+            pointerEvents="none"
             stroke={stroke}
             strokeLinejoin="round"
             strokeWidth={1.5}
@@ -323,6 +325,7 @@ function GearGlyph({
           <path
             d={gearOutlinePath}
             fill={fill}
+            pointerEvents="none"
             stroke={stroke}
             strokeLinejoin="round"
             strokeWidth={2}
@@ -332,6 +335,7 @@ function GearGlyph({
             cy={gear.center.y}
             r={GEAR_BORE_RADIUS}
             fill="transparent"
+            pointerEvents="none"
             stroke={stroke}
             strokeWidth={1.5}
           />
@@ -342,6 +346,7 @@ function GearGlyph({
         data-testid={isDraft ? undefined : `gear-hit-${gear.id}`}
         fill="rgba(0, 0, 0, 0.001)"
         fillRule="evenodd"
+        pointerEvents={pointerEvents}
         stroke="none"
       />
       {isSelected ? (
@@ -350,6 +355,7 @@ function GearGlyph({
           cy={gear.center.y}
           r={outerRadius + 6}
           fill="none"
+          pointerEvents="none"
           stroke="rgba(31, 33, 34, 0.55)"
           strokeDasharray="6 6"
           strokeWidth={1.5}
@@ -856,7 +862,13 @@ export function ClockworkEditor() {
                       onPointerDown={
                         gear.layerId === activeLayerId ? (event) => handleGearPointerDown(event, gear) : undefined
                       }
-                      pointerEvents={draftGear?.mode === 'placing' ? 'none' : 'auto'}
+                      pointerEvents={
+                        draftGear?.mode === 'placing'
+                          ? 'none'
+                          : gear.layerId === activeLayerId
+                            ? 'auto'
+                            : 'none'
+                      }
                     />
                   ))}
 

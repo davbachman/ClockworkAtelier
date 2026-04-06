@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "layers": [
+    {
+      "id": "layer-1",
+      "name": "Second Hand Layer",
+      "order": 1
+    },
+    {
+      "id": "layer-2",
+      "name": "Minute Hand Layer",
+      "order": 2
+    },
+    {
+      "id": "layer-3",
+      "name": "Hour Hand Layer",
+      "order": 3
+    }
+  ],
+  "gears": [
+    {
+      "id": "gear-1",
+      "teeth": 12,
+      "layerId": "layer-3",
+      "center": {
+        "x": -440,
+        "y": 280
+      }
+    },
+    {
+      "id": "gear-2",
+      "teeth": 72,
+      "layerId": "layer-3",
+      "center": {
+        "x": -320.0619375803697,
+        "y": 270.40639866490875
+      }
+    },
+    {
+      "id": "gear-3",
+      "teeth": 10,
+      "layerId": "layer-2",
+      "center": {
+        "x": -320.0619375803697,
+        "y": 270.40639866490875
+      }
+    },
+    {
+      "id": "gear-4",
+      "teeth": 100,
+      "layerId": "layer-2",
+      "center": {
+        "x": -162.58489848113547,
+        "y": 265.1905402981534
+      }
+    },
+    {
+      "id": "gear-5",
+      "teeth": 100,
+      "layerId": "layer-2",
+      "center": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "gear-6",
+      "teeth": 20,
+      "layerId": "layer-2",
+      "center": {
+        "x": -18.90433632896503,
+        "y": 170.8446171761553
+      }
+    },
+    {
+      "id": "gear-7",
+      "teeth": 10,
+      "layerId": "layer-3",
+      "center": {
+        "x": -162.58489848113547,
+        "y": 265.1905402981534
+      }
+    },
+    {
+      "id": "gear-8",
+      "teeth": 120,
+      "layerId": "layer-3",
+      "center": {
+        "x": -1.2443411944751688,
+        "y": 358.16293752673374
+      }
+    },
+    {
+      "id": "gear-9",
+      "teeth": 120,
+      "layerId": "layer-3",
+      "center": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "gear-10",
+      "teeth": 40,
+      "layerId": "layer-3",
+      "center": {
+        "x": 200.29424395092792,
+        "y": 111.3872409224418
+      }
+    },
+    {
+      "id": "gear-11",
+      "teeth": 40,
+      "layerId": "layer-3",
+      "center": {
+        "x": 185.27641193736739,
+        "y": 224.99045444063162
+      }
+    },
+    {
+      "id": "gear-12",
+      "teeth": 60,
+      "layerId": "layer-1",
+      "center": {
+        "x": -440,
+        "y": 280
+      }
+    },
+    {
+      "id": "gear-13",
+      "teeth": 60,
+      "layerId": "layer-1",
+      "center": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "gear-14",
+      "teeth": 200,
+      "layerId": "layer-1",
+      "center": {
+        "x": -362.75091111508584,
+        "y": -84.32286032370641
+      }
+    }
+  ],
+  "camera": {
+    "panX": 0,
+    "panY": 0
+  }
+}
