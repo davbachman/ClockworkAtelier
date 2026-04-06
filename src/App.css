@@ -32,7 +32,6 @@
   cursor: default;
 }
 
-.workspace-svg[data-space='true'],
 .workspace-svg[data-panning='true'] {
   cursor: grab;
 }

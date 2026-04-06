@@ -8,7 +8,6 @@ import {
 } from 'react'
 import type {
   ChangeEvent,
-  MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react'
 import {
@@ -52,6 +51,7 @@ import type {
 } from '../lib/types'
 
 const ROMAN_NUMERALS = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI']
+const GEAR_DRAG_THRESHOLD_PX = 4
 
 function parseTeethInput(value: string) {
   if (!/^\d+$/.test(value.trim())) {
@@ -230,7 +230,6 @@ function GearGlyph({
   isDraft,
   highlightState,
   onPointerDown,
-  onContextMenu,
   pointerEvents,
 }: {
   gear: Gear
@@ -243,7 +242,6 @@ function GearGlyph({
   isDraft: boolean
   highlightState: PlacementResult['state'] | null
   onPointerDown?: (event: ReactPointerEvent<SVGGElement>) => void
-  onContextMenu?: (event: ReactMouseEvent<SVGGElement>) => void
   pointerEvents?: 'none' | 'auto'
 }) {
   const style = getGearStyle(layer, activeLayerOrder)
@@ -270,14 +268,13 @@ function GearGlyph({
     ((Math.PI * 2 * ((hubRadius + rimInnerRadius) / 2)) / spokeCount) - armWidth >= 10
   const hubRingPath = `${createCirclePath(gear.center, hubRadius)} ${createCirclePath(gear.center, GEAR_BORE_RADIUS)}`
   const rimRingPath = `${gearOutlinePath} ${createCirclePath(gear.center, rimInnerRadius)}`
-  const gearHitPath = rimRingPath
+  const gearHitPath = gearOutlinePath
   const angle = getAngleFromRpm(computedState?.rpm ?? null, playbackMs, isPlaying)
 
   return (
     <g
       data-testid={`gear-${gear.id}`}
       onPointerDown={onPointerDown}
-      onContextMenu={onContextMenu}
       opacity={isDraft ? 1 : style.opacity}
       pointerEvents={pointerEvents}
       transform={`rotate(${angle} ${gear.center.x} ${gear.center.y})`}
@@ -394,7 +391,6 @@ export function ClockworkEditor() {
     importProject,
   } = useEditorStore()
 
-  const [isSpacePressed, setIsSpacePressed] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const dialMaskId = useId().replace(/:/g, '-')
@@ -402,7 +398,12 @@ export function ClockworkEditor() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const lastPointerWorldRef = useRef<Point>(getDefaultPlacementPoint())
   const panInteractionRef = useRef<{ pointerId: number; client: Point } | null>(null)
-  const moveInteractionRef = useRef<number | null>(null)
+  const gearInteractionRef = useRef<{
+    pointerId: number
+    gearId: string
+    client: Point
+    didDrag: boolean
+  } | null>(null)
   const placementResultRef = useRef<PlacementResult | null>(null)
   const draftGearRef = useRef(draftGear)
 
@@ -443,10 +444,6 @@ export function ClockworkEditor() {
   })
 
   const handleKeyDown = useEffectEvent((event: KeyboardEvent) => {
-    if (event.key === ' ') {
-      setIsSpacePressed(true)
-    }
-
     if (event.key === 'Escape') {
       if (draftGearRef.current) {
         cancelDraft()
@@ -462,22 +459,13 @@ export function ClockworkEditor() {
     }
   })
 
-  const handleKeyUp = useEffectEvent((event: KeyboardEvent) => {
-    if (event.key === ' ') {
-      setIsSpacePressed(false)
-    }
-  })
-
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => handleKeyDown(event)
-    const onKeyUp = (event: KeyboardEvent) => handleKeyUp(event)
 
     window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('keyup', onKeyUp)
 
     return () => {
       window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('keyup', onKeyUp)
     }
   }, [])
 
@@ -509,7 +497,24 @@ export function ClockworkEditor() {
 
     lastPointerWorldRef.current = worldPoint
 
-    if (moveInteractionRef.current === event.pointerId && draftGearRef.current?.mode === 'moving') {
+    const gearInteraction = gearInteractionRef.current
+    if (gearInteraction?.pointerId === event.pointerId && draftGearRef.current?.mode === 'moving') {
+      if (!gearInteraction.didDrag) {
+        const movement = Math.hypot(
+          event.clientX - gearInteraction.client.x,
+          event.clientY - gearInteraction.client.y,
+        )
+
+        if (movement < GEAR_DRAG_THRESHOLD_PX) {
+          return
+        }
+
+        gearInteractionRef.current = {
+          ...gearInteraction,
+          didDrag: true,
+        }
+      }
+
       updateDraftCenter(worldPoint)
     }
   })
@@ -520,9 +525,17 @@ export function ClockworkEditor() {
       setIsPanning(false)
     }
 
-    if (moveInteractionRef.current === event.pointerId) {
-      moveInteractionRef.current = null
-      commitPlacementIfValid()
+    const gearInteraction = gearInteractionRef.current
+    if (gearInteraction?.pointerId === event.pointerId) {
+      gearInteractionRef.current = null
+
+      if (gearInteraction.didDrag) {
+        commitPlacementIfValid()
+        return
+      }
+
+      cancelDraft()
+      openInspector(gearInteraction.gearId, event.clientX, event.clientY)
     }
   })
 
@@ -613,7 +626,8 @@ export function ClockworkEditor() {
   function handleStagePointerDown(event: ReactPointerEvent<SVGSVGElement>) {
     closeInspector()
 
-    if (event.button === 1 || (event.button === 0 && isSpacePressed)) {
+    if (event.button === 2) {
+      event.preventDefault()
       panInteractionRef.current = {
         pointerId: event.pointerId,
         client: { x: event.clientX, y: event.clientY },
@@ -628,12 +642,7 @@ export function ClockworkEditor() {
   }
 
   function handleStagePointerUp(event: ReactPointerEvent<SVGSVGElement>) {
-    if (
-      event.button === 0 &&
-      draftGear?.mode === 'placing' &&
-      !isSpacePressed &&
-      !panInteractionRef.current
-    ) {
+    if (event.button === 0 && draftGear?.mode === 'placing' && !panInteractionRef.current) {
       if (placementResult && !isInvalidPlacementState(placementResult.state)) {
         commitDraft(placementResult.center)
       }
@@ -658,18 +667,12 @@ export function ClockworkEditor() {
 
     event.stopPropagation()
     startMoveGear(gear.id, worldPoint)
-    moveInteractionRef.current = event.pointerId
-  }
-
-  function handleGearContextMenu(event: ReactMouseEvent<SVGGElement>, gear: Gear) {
-    event.preventDefault()
-    event.stopPropagation()
-
-    if (gear.layerId !== activeLayerId) {
-      return
+    gearInteractionRef.current = {
+      pointerId: event.pointerId,
+      gearId: gear.id,
+      client: { x: event.clientX, y: event.clientY },
+      didDrag: false,
     }
-
-    openInspector(gear.id, event.clientX, event.clientY)
   }
 
   function getGearHighlightState(gearId: string) {
@@ -731,6 +734,7 @@ export function ClockworkEditor() {
           {inspector && inspectorGear ? (
             <div
               className="inspector"
+              data-testid="gear-inspector"
               style={{
                 left: Math.min(inspector.screenX + 12, window.innerWidth - 250),
                 top: Math.min(inspector.screenY + 12, window.innerHeight - 140),
@@ -752,7 +756,6 @@ export function ClockworkEditor() {
             ref={svgRef}
             className="workspace-svg"
             data-panning={isPanning}
-            data-space={isSpacePressed}
             viewBox={getViewBox(camera)}
             onContextMenu={(event) => event.preventDefault()}
             onPointerDown={handleStagePointerDown}
@@ -850,11 +853,6 @@ export function ClockworkEditor() {
                       highlightState={getGearHighlightState(gear.id)}
                       onPointerDown={
                         gear.layerId === activeLayerId ? (event) => handleGearPointerDown(event, gear) : undefined
-                      }
-                      onContextMenu={
-                        gear.layerId === activeLayerId
-                          ? (event) => handleGearContextMenu(event, gear)
-                          : undefined
                       }
                       pointerEvents={draftGear?.mode === 'placing' ? 'none' : 'auto'}
                     />
@@ -998,7 +996,7 @@ export function ClockworkEditor() {
             </g>
           </svg>
 
-          <div className="workspace-caption">Space + drag or middle mouse to pan</div>
+          <div className="workspace-caption">Two-finger click + drag to pan</div>
         </div>
       </section>
 

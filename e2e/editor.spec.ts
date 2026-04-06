@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test('creates a layer and places a gear', async ({ page }) => {
+test('creates a layer, places a gear, and opens the inspector from the gear center', async ({ page }) => {
   await page.goto('/')
 
   await page.getByTestId('new-layer-button').click()
@@ -17,4 +17,9 @@ test('creates a layer and places a gear', async ({ page }) => {
   await page.mouse.click((box?.x ?? 0) + 760, (box?.y ?? 0) + 430)
 
   await expect(page.getByTestId('gear-gear-1')).toBeVisible()
+
+  await page.mouse.click((box?.x ?? 0) + 760, (box?.y ?? 0) + 430)
+
+  await expect(page.getByTestId('gear-inspector')).toContainText('Gear gear-1')
+  await expect(page.getByTestId('gear-inspector')).toContainText('Teeth: 36')
 })
