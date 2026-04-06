@@ -268,7 +268,8 @@ function GearGlyph({
     ((Math.PI * 2 * ((hubRadius + rimInnerRadius) / 2)) / spokeCount) - armWidth >= 10
   const hubRingPath = `${createCirclePath(gear.center, hubRadius)} ${createCirclePath(gear.center, GEAR_BORE_RADIUS)}`
   const rimRingPath = `${gearOutlinePath} ${createCirclePath(gear.center, rimInnerRadius)}`
-  const gearHitPath = gearOutlinePath
+  const gearHitRadius = (rootRadius + outerRadius) / 2
+  const gearHitPath = createCirclePath(gear.center, gearHitRadius)
   const angle = getAngleFromRpm(computedState?.rpm ?? null, playbackMs, isPlaying)
 
   return (
