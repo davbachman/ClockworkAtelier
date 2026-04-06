@@ -712,6 +712,7 @@ export function ClockworkEditor() {
         data-testid={`arbor-${anchor}`}
         fill="none"
         opacity={strokeStyle.opacity}
+        pointerEvents="none"
         stroke={strokeStyle.stroke}
         strokeWidth={2}
       />
@@ -808,7 +809,7 @@ export function ClockworkEditor() {
               fill="url(#schematic-grid)"
             />
 
-            <g>
+            <g pointerEvents="none">
               <rect
                 x={MOTOR_CENTER.x - 24}
                 y={MOTOR_CENTER.y - 24}
