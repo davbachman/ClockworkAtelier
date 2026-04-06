@@ -214,7 +214,7 @@ describe('App', () => {
     })
   })
 
-  it('deletes the selected gear from the on-screen delete button', () => {
+  it('deletes a gear when it is dragged off the canvas', () => {
     const { container } = render(<App />)
     const svgElement = container.querySelector('svg')
     expect(svgElement).not.toBeNull()
@@ -224,9 +224,8 @@ describe('App', () => {
 
     const gearHitTarget = screen.getByTestId('gear-hit-gear-1')
     fireEvent.pointerDown(gearHitTarget, { button: 0, pointerId: 15, clientX: 700, clientY: 450 })
-    fireEvent.pointerUp(window, { button: 0, pointerId: 15, clientX: 700, clientY: 450 })
-
-    fireEvent.click(screen.getByTestId('delete-gear-button'))
+    fireEvent.pointerMove(window, { pointerId: 15, clientX: 720, clientY: 450 })
+    fireEvent.pointerUp(window, { button: 0, pointerId: 15, clientX: 1400, clientY: 450 })
 
     expect(screen.queryByTestId('gear-gear-1')).not.toBeInTheDocument()
     expect(useEditorStore.getState().selectedGearId).toBeNull()

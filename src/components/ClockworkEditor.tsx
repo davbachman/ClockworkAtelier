@@ -457,8 +457,6 @@ export function ClockworkEditor() {
   const analysis = analyzeClockwork(gears, layers)
   const parsedTeeth = parseTeethInput(toothInput)
   const canCreateGear = activeLayerId !== null && parsedTeeth !== null
-  const selectedGear =
-    selectedGearId === null ? null : gears.find((gear) => gear.id === selectedGearId) ?? null
   const inspectorGear = inspector ? gears.find((gear) => gear.id === inspector.gearId) ?? null : null
 
   placementResultRef.current = placementResult
@@ -616,8 +614,16 @@ export function ClockworkEditor() {
     const gearInteraction = gearInteractionRef.current
     if (gearInteraction?.pointerId === event.pointerId) {
       gearInteractionRef.current = null
+      const svgElement = svgRef.current
+      const releasedOnCanvas =
+        svgElement !== null && isClientInsideElement(svgElement, event.clientX, event.clientY)
 
       if (gearInteraction.didDrag) {
+        if (!releasedOnCanvas) {
+          deleteSelection()
+          return
+        }
+
         commitPlacementIfValid()
         return
       }
@@ -1231,24 +1237,6 @@ export function ClockworkEditor() {
             </button>
           </div>
         </div>
-
-        {selectedGear ? (
-          <div className="panel">
-            <h2>Selected Gear</h2>
-            <p>Gear {selectedGear.id}</p>
-            <p>Teeth: {selectedGear.teeth}</p>
-            <div className="selected-gear-actions">
-              <button
-                className="sidebar-button"
-                data-testid="delete-gear-button"
-                onClick={() => deleteSelection()}
-                type="button"
-              >
-                Delete Gear
-              </button>
-            </div>
-          </div>
-        ) : null}
 
         <div className="panel">
           <h2>Project</h2>

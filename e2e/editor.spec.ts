@@ -115,6 +115,33 @@ test('arms new gear placement from the button before dragging on the canvas', as
   await expect(page.getByTestId('gear-gear-1')).toBeVisible()
 })
 
+test('deletes a gear when it is dragged off the canvas', async ({ page }) => {
+  await page.goto('/')
+
+  await page.getByTestId('tooth-input').fill('24')
+
+  const workspace = page.locator('svg.workspace-svg')
+  const box = await workspace.boundingBox()
+  expect(box).not.toBeNull()
+
+  const centerX = (box?.x ?? 0) + 720
+  const centerY = (box?.y ?? 0) + 430
+
+  await dragNewGearTo(page, {
+    x: centerX,
+    y: centerY,
+  })
+
+  await expect(page.getByTestId('gear-gear-1')).toBeVisible()
+
+  await page.mouse.move(centerX, centerY)
+  await page.mouse.down()
+  await page.mouse.move((box?.x ?? 0) + (box?.width ?? 0) + 60, centerY, { steps: 8 })
+  await page.mouse.up()
+
+  await expect(page.getByTestId('gear-gear-1')).toHaveCount(0)
+})
+
 test('selects all imported minute-layer gears at their centers', async ({ page }) => {
   await page.goto('/')
   await importProject(page)
