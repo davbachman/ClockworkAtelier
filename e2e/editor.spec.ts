@@ -24,6 +24,27 @@ async function importProject(page: Page) {
   await expect(page.getByText('Project imported.')).toBeVisible()
 }
 
+async function dragNewGearTo(
+  page: Page,
+  target: { x: number; y: number },
+) {
+  const buttonBox = await page.getByTestId('gear-create-button').boundingBox()
+  expect(buttonBox).not.toBeNull()
+
+  const startX = (buttonBox?.x ?? 0) + (buttonBox?.width ?? 0) / 2
+  const startY = (buttonBox?.y ?? 0) + (buttonBox?.height ?? 0) / 2
+
+  await page.mouse.move(startX, startY)
+  await page.mouse.down()
+  await page.mouse.move(target.x, target.y, { steps: 8 })
+  await page.mouse.up()
+}
+
+async function armNewGearFromButton(page: Page) {
+  await page.getByTestId('gear-create-button').click()
+  await expect(page.getByTestId('gear-create-button')).toHaveAttribute('data-active', 'true')
+}
+
 test('creates a layer, places a gear, and opens the inspector from the gear center', async ({ page }) => {
   await page.goto('/')
 
@@ -31,14 +52,15 @@ test('creates a layer, places a gear, and opens the inspector from the gear cent
   await expect(page.getByTestId('layer-button-4')).toBeVisible()
 
   await page.getByTestId('tooth-input').fill('36')
-  await page.getByTestId('gear-create-button').click()
 
   const workspace = page.locator('svg.workspace-svg')
   const box = await workspace.boundingBox()
   expect(box).not.toBeNull()
 
-  await page.mouse.move((box?.x ?? 0) + 760, (box?.y ?? 0) + 430)
-  await page.mouse.click((box?.x ?? 0) + 760, (box?.y ?? 0) + 430)
+  await dragNewGearTo(page, {
+    x: (box?.x ?? 0) + 760,
+    y: (box?.y ?? 0) + 430,
+  })
 
   await expect(page.getByTestId('gear-gear-1')).toBeVisible()
 
@@ -53,7 +75,6 @@ test('opens the inspector for a small gear centered on the minute arbor', async 
 
   await page.getByTestId('layer-button-2').click()
   await page.getByTestId('tooth-input').fill('12')
-  await page.getByTestId('gear-create-button').click()
 
   const workspace = page.locator('svg.workspace-svg')
   const box = await workspace.boundingBox()
@@ -62,8 +83,7 @@ test('opens the inspector for a small gear centered on the minute arbor', async 
   const centerX = (box?.x ?? 0) + (box?.width ?? 0) / 2
   const centerY = (box?.y ?? 0) + (box?.height ?? 0) / 2
 
-  await page.mouse.move(centerX, centerY)
-  await page.mouse.click(centerX, centerY)
+  await dragNewGearTo(page, { x: centerX, y: centerY })
 
   await expect(page.getByTestId('gear-gear-1')).toBeVisible()
 
@@ -71,6 +91,28 @@ test('opens the inspector for a small gear centered on the minute arbor', async 
 
   await expect(page.getByTestId('gear-inspector')).toContainText('Gear gear-1')
   await expect(page.getByTestId('gear-inspector')).toContainText('Teeth: 12')
+})
+
+test('arms new gear placement from the button before dragging on the canvas', async ({ page }) => {
+  await page.goto('/')
+
+  await page.getByTestId('tooth-input').fill('24')
+  await armNewGearFromButton(page)
+
+  const workspace = page.locator('svg.workspace-svg')
+  const box = await workspace.boundingBox()
+  expect(box).not.toBeNull()
+
+  const target = {
+    x: (box?.x ?? 0) + 720,
+    y: (box?.y ?? 0) + 430,
+  }
+
+  await page.mouse.move(target.x, target.y)
+  await page.mouse.down()
+  await page.mouse.up()
+
+  await expect(page.getByTestId('gear-gear-1')).toBeVisible()
 })
 
 test('selects all imported minute-layer gears at their centers', async ({ page }) => {

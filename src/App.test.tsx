@@ -16,11 +16,16 @@ function mockSvgBounds(svgElement: SVGSVGElement) {
   })
 }
 
-function placeGear(svgElement: SVGSVGElement, teeth = '40', clientX = 700, clientY = 450) {
+function placeGear(teeth = '40', clientX = 700, clientY = 450) {
   fireEvent.change(screen.getByTestId('tooth-input'), { target: { value: teeth } })
-  fireEvent.click(screen.getByTestId('gear-create-button'))
-  fireEvent.pointerMove(svgElement, { clientX, clientY })
-  fireEvent.pointerUp(svgElement, { button: 0, clientX, clientY })
+  fireEvent.pointerDown(screen.getByTestId('gear-create-button'), {
+    button: 0,
+    pointerId: 9,
+    clientX: 20,
+    clientY: 20,
+  })
+  fireEvent.pointerMove(window, { pointerId: 9, clientX, clientY })
+  fireEvent.pointerUp(window, { button: 0, pointerId: 9, clientX, clientY })
 }
 
 describe('App', () => {
@@ -62,9 +67,69 @@ describe('App', () => {
     fireEvent.change(screen.getByTestId('tooth-input'), { target: { value: '40' } })
     expect(screen.getByTestId('gear-create-button')).toBeEnabled()
 
-    placeGear(svgElement as SVGSVGElement)
+    placeGear()
 
     expect(screen.getByTestId('gear-gear-1')).toBeInTheDocument()
+  })
+
+  it('arms new gear placement from the button and places after a canvas drag', () => {
+    const { container } = render(<App />)
+    const svgElement = container.querySelector('svg')
+    expect(svgElement).not.toBeNull()
+
+    mockSvgBounds(svgElement as SVGSVGElement)
+
+    fireEvent.change(screen.getByTestId('tooth-input'), { target: { value: '40' } })
+    fireEvent.pointerDown(screen.getByTestId('gear-create-button'), {
+      button: 0,
+      pointerId: 10,
+      clientX: 20,
+      clientY: 20,
+    })
+    fireEvent.pointerUp(window, { button: 0, pointerId: 10, clientX: 1400, clientY: 20 })
+
+    expect(useEditorStore.getState().draftGear).toMatchObject({
+      mode: 'placing',
+    })
+
+    fireEvent.pointerDown(svgElement as SVGSVGElement, {
+      button: 0,
+      pointerId: 11,
+      clientX: 700,
+      clientY: 450,
+    })
+    fireEvent.pointerUp(window, { button: 0, pointerId: 11, clientX: 700, clientY: 450 })
+
+    expect(screen.getByTestId('gear-gear-1')).toBeInTheDocument()
+  })
+
+  it('cancels new gear placement when released off canvas after dragging on the canvas', () => {
+    const { container } = render(<App />)
+    const svgElement = container.querySelector('svg')
+    expect(svgElement).not.toBeNull()
+
+    mockSvgBounds(svgElement as SVGSVGElement)
+
+    fireEvent.change(screen.getByTestId('tooth-input'), { target: { value: '40' } })
+    fireEvent.pointerDown(screen.getByTestId('gear-create-button'), {
+      button: 0,
+      pointerId: 12,
+      clientX: 20,
+      clientY: 20,
+    })
+    fireEvent.pointerUp(window, { button: 0, pointerId: 12, clientX: 1400, clientY: 20 })
+
+    fireEvent.pointerDown(svgElement as SVGSVGElement, {
+      button: 0,
+      pointerId: 13,
+      clientX: 700,
+      clientY: 450,
+    })
+    fireEvent.pointerMove(window, { pointerId: 13, clientX: 720, clientY: 450 })
+    fireEvent.pointerUp(window, { button: 0, pointerId: 13, clientX: 1400, clientY: 450 })
+
+    expect(screen.queryByTestId('gear-gear-1')).not.toBeInTheDocument()
+    expect(useEditorStore.getState().draftGear).toBeNull()
   })
 
   it('opens the gear inspector on a single click', () => {
@@ -74,7 +139,7 @@ describe('App', () => {
 
     mockSvgBounds(svgElement as SVGSVGElement)
 
-    placeGear(svgElement as SVGSVGElement)
+    placeGear()
 
     const gearHitTarget = screen.getByTestId('gear-hit-gear-1')
     fireEvent.pointerDown(gearHitTarget, { button: 0, pointerId: 1, clientX: 700, clientY: 450 })
@@ -91,7 +156,7 @@ describe('App', () => {
     expect(svgElement).not.toBeNull()
 
     mockSvgBounds(svgElement as SVGSVGElement)
-    placeGear(svgElement as SVGSVGElement)
+    placeGear()
 
     const gearHitTarget = screen.getByTestId('gear-hit-gear-1')
     fireEvent.pointerDown(gearHitTarget, { button: 0, pointerId: 2, clientX: 700, clientY: 450 })
@@ -125,6 +190,46 @@ describe('App', () => {
       panX: -60,
       panY: -60,
     })
+  })
+
+  it('pans the canvas when dragging the empty canvas with the primary pointer', () => {
+    const { container } = render(<App />)
+    const svgElement = container.querySelector('svg')
+    expect(svgElement).not.toBeNull()
+
+    mockSvgBounds(svgElement as SVGSVGElement)
+
+    fireEvent.pointerDown(svgElement as SVGSVGElement, {
+      button: 0,
+      pointerId: 14,
+      clientX: 600,
+      clientY: 450,
+    })
+    fireEvent.pointerMove(window, { pointerId: 14, clientX: 660, clientY: 510 })
+    fireEvent.pointerUp(window, { button: 0, pointerId: 14, clientX: 660, clientY: 510 })
+
+    expect(useEditorStore.getState().camera).toEqual({
+      panX: -60,
+      panY: -60,
+    })
+  })
+
+  it('deletes the selected gear from the on-screen delete button', () => {
+    const { container } = render(<App />)
+    const svgElement = container.querySelector('svg')
+    expect(svgElement).not.toBeNull()
+
+    mockSvgBounds(svgElement as SVGSVGElement)
+    placeGear()
+
+    const gearHitTarget = screen.getByTestId('gear-hit-gear-1')
+    fireEvent.pointerDown(gearHitTarget, { button: 0, pointerId: 15, clientX: 700, clientY: 450 })
+    fireEvent.pointerUp(window, { button: 0, pointerId: 15, clientX: 700, clientY: 450 })
+
+    fireEvent.click(screen.getByTestId('delete-gear-button'))
+
+    expect(screen.queryByTestId('gear-gear-1')).not.toBeInTheDocument()
+    expect(useEditorStore.getState().selectedGearId).toBeNull()
   })
 
   it('renders minute and hour arbors with their corresponding layer groups', () => {

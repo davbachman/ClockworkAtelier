@@ -219,6 +219,23 @@ function createWorldDeltaFromClient(
   }
 }
 
+function isClientInsideElement(
+  element: SVGSVGElement,
+  clientX: number,
+  clientY: number,
+) {
+  const bounds = element.getBoundingClientRect()
+
+  return (
+    bounds.width > 0 &&
+    bounds.height > 0 &&
+    clientX >= bounds.left &&
+    clientX <= bounds.right &&
+    clientY >= bounds.top &&
+    clientY <= bounds.bottom
+  )
+}
+
 function GearGlyph({
   gear,
   layer,
@@ -404,7 +421,17 @@ export function ClockworkEditor() {
   const fileInputId = useId()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const lastPointerWorldRef = useRef<Point>(getDefaultPlacementPoint())
-  const panInteractionRef = useRef<{ pointerId: number; client: Point } | null>(null)
+  const panInteractionRef = useRef<{
+    pointerId: number
+    client: Point
+    didDrag: boolean
+    clearsSelectionOnTap: boolean
+  } | null>(null)
+  const placementInteractionRef = useRef<{
+    pointerId: number
+    startedFromButton: boolean
+    touchedCanvas: boolean
+  } | null>(null)
   const gearInteractionRef = useRef<{
     pointerId: number
     gearId: string
@@ -430,6 +457,8 @@ export function ClockworkEditor() {
   const analysis = analyzeClockwork(gears, layers)
   const parsedTeeth = parseTeethInput(toothInput)
   const canCreateGear = activeLayerId !== null && parsedTeeth !== null
+  const selectedGear =
+    selectedGearId === null ? null : gears.find((gear) => gear.id === selectedGearId) ?? null
   const inspectorGear = inspector ? gears.find((gear) => gear.id === inspector.gearId) ?? null : null
 
   placementResultRef.current = placementResult
@@ -452,7 +481,7 @@ export function ClockworkEditor() {
 
   const handleKeyDown = useEffectEvent((event: KeyboardEvent) => {
     if (event.key === 'Escape') {
-      if (draftGearRef.current) {
+      if (draftGearRef.current?.mode === 'moving') {
         cancelDraft()
       } else {
         closeInspector()
@@ -483,14 +512,35 @@ export function ClockworkEditor() {
     }
 
     if (panInteractionRef.current && panInteractionRef.current.pointerId === event.pointerId) {
+      const panInteraction = panInteractionRef.current
+      const clientDeltaX = event.clientX - panInteraction.client.x
+      const clientDeltaY = event.clientY - panInteraction.client.y
+
+      if (!panInteraction.didDrag) {
+        const movement = Math.hypot(
+          event.clientX - panInteraction.client.x,
+          event.clientY - panInteraction.client.y,
+        )
+
+        if (movement < GEAR_DRAG_THRESHOLD_PX) {
+          return
+        }
+
+        panInteractionRef.current = {
+          ...panInteraction,
+          didDrag: true,
+        }
+        setIsPanning(true)
+      }
+
       const delta = createWorldDeltaFromClient(
         svgElement,
-        event.clientX - panInteractionRef.current.client.x,
-        event.clientY - panInteractionRef.current.client.y,
+        clientDeltaX,
+        clientDeltaY,
       )
 
       panInteractionRef.current = {
-        pointerId: event.pointerId,
+        ...panInteractionRef.current,
         client: { x: event.clientX, y: event.clientY },
       }
       panBy(delta)
@@ -498,14 +548,16 @@ export function ClockworkEditor() {
     }
 
     const worldPoint = createWorldPointFromClient(svgElement, event.clientX, event.clientY, camera)
-    if (!worldPoint) {
-      return
-    }
-
-    lastPointerWorldRef.current = worldPoint
+    const isInsideCanvas = isClientInsideElement(svgElement, event.clientX, event.clientY)
 
     const gearInteraction = gearInteractionRef.current
     if (gearInteraction?.pointerId === event.pointerId && draftGearRef.current?.mode === 'moving') {
+      if (!worldPoint) {
+        return
+      }
+
+      lastPointerWorldRef.current = worldPoint
+
       if (!gearInteraction.didDrag) {
         const movement = Math.hypot(
           event.clientX - gearInteraction.client.x,
@@ -523,13 +575,42 @@ export function ClockworkEditor() {
       }
 
       updateDraftCenter(worldPoint)
+      return
     }
+
+    if (
+      placementInteractionRef.current?.pointerId === event.pointerId &&
+      draftGearRef.current?.mode === 'placing'
+    ) {
+      if (!isInsideCanvas || !worldPoint) {
+        return
+      }
+
+      placementInteractionRef.current = {
+        ...placementInteractionRef.current,
+        touchedCanvas: true,
+      }
+      lastPointerWorldRef.current = worldPoint
+      updateDraftCenter(worldPoint)
+      return
+    }
+
+    if (!worldPoint) {
+      return
+    }
+
+    lastPointerWorldRef.current = worldPoint
   })
 
   const handlePointerUp = useEffectEvent((event: PointerEvent) => {
     if (panInteractionRef.current?.pointerId === event.pointerId) {
+      const panInteraction = panInteractionRef.current
       panInteractionRef.current = null
       setIsPanning(false)
+
+      if (panInteraction.clearsSelectionOnTap && !panInteraction.didDrag && !draftGearRef.current) {
+        selectGear(null)
+      }
     }
 
     const gearInteraction = gearInteractionRef.current
@@ -543,6 +624,30 @@ export function ClockworkEditor() {
 
       cancelDraft()
       openInspector(gearInteraction.gearId, event.clientX, event.clientY)
+    }
+
+    if (placementInteractionRef.current?.pointerId === event.pointerId) {
+      const placementInteraction = placementInteractionRef.current
+      placementInteractionRef.current = null
+
+      const svgElement = svgRef.current
+      const releasedOnCanvas =
+        svgElement !== null && isClientInsideElement(svgElement, event.clientX, event.clientY)
+
+      if (
+        releasedOnCanvas &&
+        placementResultRef.current &&
+        !isInvalidPlacementState(placementResultRef.current.state)
+      ) {
+        commitDraft(placementResultRef.current.center)
+        return
+      }
+
+      if (placementInteraction.startedFromButton && !placementInteraction.touchedCanvas) {
+        return
+      }
+
+      cancelDraft()
     }
   })
 
@@ -613,8 +718,29 @@ export function ClockworkEditor() {
     setNotice({ message: 'Project exported.', variant: 'success' })
   }
 
-  function handleCreateGear() {
+  function handleCreateGearPointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0 || !canCreateGear) {
+      return
+    }
+
+    if (draftGear?.mode === 'placing') {
+      placementInteractionRef.current = null
+      cancelDraft()
+      return
+    }
+
+    if (draftGear !== null) {
+      return
+    }
+
+    event.preventDefault()
+    closeInspector()
     startPlacement(lastPointerWorldRef.current ?? getDefaultPlacementPoint())
+    placementInteractionRef.current = {
+      pointerId: event.pointerId,
+      startedFromButton: true,
+      touchedCanvas: false,
+    }
   }
 
   function handleStagePointerMove(event: ReactPointerEvent<SVGSVGElement>) {
@@ -624,35 +750,54 @@ export function ClockworkEditor() {
     }
 
     lastPointerWorldRef.current = worldPoint
-
-    if (draftGear?.mode === 'placing') {
-      updateDraftCenter(worldPoint)
-    }
   }
 
   function handleStagePointerDown(event: ReactPointerEvent<SVGSVGElement>) {
     closeInspector()
+
+    const worldPoint = createWorldPointFromClient(
+      event.currentTarget,
+      event.clientX,
+      event.clientY,
+      camera,
+    )
 
     if (event.button === 2) {
       event.preventDefault()
       panInteractionRef.current = {
         pointerId: event.pointerId,
         client: { x: event.clientX, y: event.clientY },
+        didDrag: true,
+        clearsSelectionOnTap: false,
       }
       setIsPanning(true)
       return
     }
 
-    if (event.button === 0 && draftGear === null) {
-      selectGear(null)
+    if (event.button !== 0) {
+      return
     }
-  }
 
-  function handleStagePointerUp(event: ReactPointerEvent<SVGSVGElement>) {
-    if (event.button === 0 && draftGear?.mode === 'placing' && !panInteractionRef.current) {
-      if (placementResult && !isInvalidPlacementState(placementResult.state)) {
-        commitDraft(placementResult.center)
+    if (draftGear?.mode === 'placing') {
+      if (!worldPoint) {
+        return
       }
+
+      placementInteractionRef.current = {
+        pointerId: event.pointerId,
+        startedFromButton: false,
+        touchedCanvas: true,
+      }
+      lastPointerWorldRef.current = worldPoint
+      updateDraftCenter(worldPoint)
+      return
+    }
+
+    panInteractionRef.current = {
+      pointerId: event.pointerId,
+      client: { x: event.clientX, y: event.clientY },
+      didDrag: false,
+      clearsSelectionOnTap: true,
     }
   }
 
@@ -768,7 +913,6 @@ export function ClockworkEditor() {
             onContextMenu={(event) => event.preventDefault()}
             onPointerDown={handleStagePointerDown}
             onPointerMove={handleStagePointerMove}
-            onPointerUp={handleStagePointerUp}
           >
             <defs>
               <pattern
@@ -1010,7 +1154,7 @@ export function ClockworkEditor() {
             </g>
           </svg>
 
-          <div className="workspace-caption">Two-finger click + drag to pan</div>
+          <div className="workspace-caption">Drag empty canvas to pan</div>
         </div>
       </section>
 
@@ -1040,7 +1184,7 @@ export function ClockworkEditor() {
               data-active={draftGear?.mode === 'placing'}
               data-testid="gear-create-button"
               disabled={!canCreateGear}
-              onClick={handleCreateGear}
+              onPointerDown={handleCreateGearPointerDown}
               type="button"
             >
               ⚙
@@ -1087,6 +1231,24 @@ export function ClockworkEditor() {
             </button>
           </div>
         </div>
+
+        {selectedGear ? (
+          <div className="panel">
+            <h2>Selected Gear</h2>
+            <p>Gear {selectedGear.id}</p>
+            <p>Teeth: {selectedGear.teeth}</p>
+            <div className="selected-gear-actions">
+              <button
+                className="sidebar-button"
+                data-testid="delete-gear-button"
+                onClick={() => deleteSelection()}
+                type="button"
+              >
+                Delete Gear
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <div className="panel">
           <h2>Project</h2>
