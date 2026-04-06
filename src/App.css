@@ -2,6 +2,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 19rem;
   min-height: 100svh;
+  -webkit-user-select: none;
+  user-select: none;
   background:
     radial-gradient(circle at top left, rgba(87, 123, 95, 0.12), transparent 28%),
     radial-gradient(circle at bottom right, rgba(23, 40, 48, 0.08), transparent 35%),
@@ -160,6 +162,8 @@
   background: rgba(255, 253, 248, 0.9);
   font: inherit;
   color: var(--ink);
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .helper-text {

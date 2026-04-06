@@ -784,6 +784,8 @@ export function ClockworkEditor() {
       return
     }
 
+    event.preventDefault()
+
     if (draftGear?.mode === 'placing') {
       if (!worldPoint) {
         return
@@ -823,6 +825,7 @@ export function ClockworkEditor() {
       return
     }
 
+    event.preventDefault()
     event.stopPropagation()
     startMoveGear(gear.id, worldPoint)
     gearInteractionRef.current = {
