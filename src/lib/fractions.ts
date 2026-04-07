@@ -58,5 +58,5 @@ export function approximateFraction(value: number, maxDenominator = 1_000_000) {
 
 export function formatRpmFraction(rpm: number) {
   const { numerator, denominator } = approximateFraction(rpm)
-  return `${numerator}/${denominator} rpm`
+  return `${numerator}/${denominator} rev/year`
 }

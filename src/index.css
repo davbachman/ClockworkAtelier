@@ -1,9 +1,11 @@
 :root {
   --paper: #f6f0e4;
+  --paper-strong: #efe7d9;
   --paper-shadow: #ebe2d2;
   --ink: #1f2122;
   --ink-muted: #625d55;
   --ink-faint: rgba(31, 33, 34, 0.18);
+  --gear-neutral-stroke: rgba(31, 33, 34, 0.48);
   --gear-below: #b5aea1;
   --gear-above-opacity: 0.16;
   --signal-good: #4d8751;
@@ -38,6 +40,7 @@ body,
 body {
   margin: 0;
   min-width: 320px;
+  background: var(--paper-shadow);
 }
 
 button,

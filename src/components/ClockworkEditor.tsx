@@ -8,12 +8,11 @@ import {
 } from 'react'
 import type {
   ChangeEvent,
+  MouseEvent as ReactClickEvent,
+  MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react'
 import {
-  ARBOR_BY_LAYER_ORDER,
-  ARBOR_RADII,
-  CLOCK_CENTER,
   DIAL_INNER_RADIUS,
   DIAL_MIDDLE_RADIUS,
   DIAL_OUTER_RADIUS,
@@ -22,8 +21,14 @@ import {
   MIN_TEETH,
   MOTOR_AXLE_RADIUS,
   MOTOR_CENTER,
+  ROMAN_NUMERALS,
+  WEEKDAY_NAMES,
   WORLD_HEIGHT,
   WORLD_WIDTH,
+  WORKSPACE_CENTER,
+  getModeConfig,
+  getOutputForLayer,
+  getOutputById,
 } from '../lib/constants'
 import {
   addPoints,
@@ -37,21 +42,69 @@ import {
   scalePoint,
 } from '../lib/geometry'
 import { formatRpmFraction } from '../lib/fractions'
-import { getAnimatedHandAngle } from '../lib/hands'
+import { getAnimatedAngle } from '../lib/hands'
+import { SUN_ART_ASSET, SUN_OCCLUDER_ASSET } from '../lib/orreryAssets'
+import { PLANET_ASSETS } from '../lib/planetAssets'
 import { buildProjectSnapshot, parseProjectJson, serializeProject } from '../lib/project'
 import { analyzeClockwork } from '../lib/solver'
 import { getDefaultPlacementPoint, useEditorStore } from '../store/editorStore'
 import type {
-  AnchorKind,
+  AnchorId,
   ComputedGearState,
+  EditorMode,
   Gear,
   Layer,
+  OutputTarget,
   PlacementResult,
   Point,
 } from '../lib/types'
 
-const ROMAN_NUMERALS = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI']
 const GEAR_DRAG_THRESHOLD_PX = 4
+const PLANET_SIZES: Record<string, number> = {
+  mercury: 44,
+  venus: 48,
+  earth: 50,
+  mars: 46,
+  jupiter: 60,
+  saturn: 72,
+}
+const SUN_IMAGE_SIZE = 140
+const SUN_DISC_RADIUS = 52
+const CLOCK_COMPLICATION_DIAL_RADIUS = 72
+const CLOCK_DAY_INNER_RING_RADIUS = 46
+const CLOCK_DAY_LABEL_RADIUS = 58
+const CLOCK_AM_PM_HAND_LENGTH = 56
+const CLOCK_DAY_HAND_LENGTH = 54
+const OPTIONAL_LAYER_IDS_BY_MODE = {
+  clock: ['layer-4', 'layer-5'],
+  orrery: ['layer-5', 'layer-6'],
+} as const
+const DEFAULT_OPTIONAL_LAYER_VISIBILITY = {
+  clock: {
+    'layer-4': false,
+    'layer-5': false,
+  },
+  orrery: {
+    'layer-5': false,
+    'layer-6': false,
+  },
+} as const
+
+function isOptionalLayer(mode: EditorMode, layerId: string) {
+  return OPTIONAL_LAYER_IDS_BY_MODE[mode].includes(layerId as never)
+}
+
+function getOptionalLayerVisibility(
+  visibilityByMode: typeof DEFAULT_OPTIONAL_LAYER_VISIBILITY,
+  mode: EditorMode,
+  layerId: string,
+) {
+  if (!isOptionalLayer(mode, layerId)) {
+    return true
+  }
+
+  return (visibilityByMode[mode] as Record<string, boolean>)[layerId] ?? false
+}
 
 function parseTeethInput(value: string) {
   if (!/^\d+$/.test(value.trim())) {
@@ -66,15 +119,15 @@ function parseTeethInput(value: string) {
   return parsedValue
 }
 
-function getAngleFromRpm(rpm: number | null, playbackMs: number, isPlaying: boolean) {
-  if (!isPlaying || rpm === null) {
-    return 0
+function getGearStyle(layer: Layer, activeLayerOrder: number | null) {
+  if (activeLayerOrder === null) {
+    return {
+      opacity: 1,
+      stroke: 'var(--gear-neutral-stroke)',
+      fill: 'var(--paper)',
+    }
   }
 
-  return (rpm * 360 * playbackMs) / 60000
-}
-
-function getGearStyle(layer: Layer, activeLayerOrder: number | null) {
   const visualState = getLayerVisualState(layer.order, activeLayerOrder)
 
   if (visualState === 'above') {
@@ -89,7 +142,7 @@ function getGearStyle(layer: Layer, activeLayerOrder: number | null) {
     return {
       opacity: 0.92,
       stroke: 'var(--gear-below)',
-      fill: '#efe7d9',
+      fill: 'var(--paper-strong)',
     }
   }
 
@@ -140,6 +193,11 @@ function getPointOnCircle(center: Point, radius: number, angle: number): Point {
     x: center.x + Math.cos(angle) * radius,
     y: center.y + Math.sin(angle) * radius,
   }
+}
+
+function getPointOnOrbit(radius: number, angleDegrees: number) {
+  const angle = ((angleDegrees - 90) * Math.PI) / 180
+  return getPointOnCircle(WORKSPACE_CENTER, radius, angle)
 }
 
 function createCirclePath(center: Point, radius: number) {
@@ -236,6 +294,73 @@ function isClientInsideElement(
   )
 }
 
+function getSafeWindowPosition(screenX: number, screenY: number, width: number, height: number) {
+  if (typeof window === 'undefined') {
+    return { left: screenX, top: screenY }
+  }
+
+  return {
+    left: Math.min(screenX + 12, window.innerWidth - width),
+    top: Math.min(screenY + 12, window.innerHeight - height),
+  }
+}
+
+function renderPlanetOccluder(
+  output: OutputTarget,
+  point: Point,
+  size: number,
+  color: string,
+) {
+  if (output.assetId === 'saturn') {
+    return (
+      <g key={`occluder-${output.id}`}>
+        <circle cx={point.x} cy={point.y} fill={color} r={size * 0.34} />
+        <ellipse
+          cx={point.x}
+          cy={point.y}
+          fill="none"
+          rx={size * 0.64}
+          ry={size * 0.18}
+          stroke={color}
+          strokeWidth={size * 0.18}
+          transform={`rotate(-24 ${point.x} ${point.y})`}
+        />
+      </g>
+    )
+  }
+
+  return <circle key={`occluder-${output.id}`} cx={point.x} cy={point.y} fill={color} r={size * 0.44} />
+}
+
+function renderSunGlyph() {
+  return (
+    <g data-testid="sun-overlay" pointerEvents="none">
+      <circle
+        cx={WORKSPACE_CENTER.x}
+        cy={WORKSPACE_CENTER.y}
+        r={SUN_DISC_RADIUS}
+        fill="var(--orrery-planet-occluder)"
+      />
+      <image
+        href={SUN_OCCLUDER_ASSET}
+        x={WORKSPACE_CENTER.x - SUN_IMAGE_SIZE / 2}
+        y={WORKSPACE_CENTER.y - SUN_IMAGE_SIZE / 2}
+        width={SUN_IMAGE_SIZE}
+        height={SUN_IMAGE_SIZE}
+        preserveAspectRatio="xMidYMid meet"
+      />
+      <image
+        href={SUN_ART_ASSET}
+        x={WORKSPACE_CENTER.x - SUN_IMAGE_SIZE / 2}
+        y={WORKSPACE_CENTER.y - SUN_IMAGE_SIZE / 2}
+        width={SUN_IMAGE_SIZE}
+        height={SUN_IMAGE_SIZE}
+        preserveAspectRatio="xMidYMid meet"
+      />
+    </g>
+  )
+}
+
 function GearGlyph({
   gear,
   layer,
@@ -287,7 +412,7 @@ function GearGlyph({
   const rimRingPath = `${gearOutlinePath} ${createCirclePath(gear.center, rimInnerRadius)}`
   const gearHitRadius = (rootRadius + outerRadius) / 2
   const gearHitPath = createCirclePath(gear.center, gearHitRadius)
-  const angle = getAngleFromRpm(computedState?.rpm ?? null, playbackMs, isPlaying)
+  const angle = (computedState?.rpm ?? 0) * 360 * (isPlaying ? playbackMs / 60000 : 0)
 
   return (
     <g
@@ -384,19 +509,10 @@ function GearGlyph({
 
 export function ClockworkEditor() {
   const {
-    layers,
-    gears,
-    activeLayerId,
-    selectedGearId,
-    draftGear,
-    toothInput,
-    isPlaying,
-    playbackMs,
-    handBaseAngles,
-    camera,
-    notice,
-    inspector,
+    activeMode,
+    workspaces,
     setToothInput,
+    switchMode,
     toggleLayer,
     addLayer,
     startPlacement,
@@ -410,14 +526,38 @@ export function ClockworkEditor() {
     setPlaybackMs,
     panBy,
     openInspector,
-    closeInspector,
+    openPlanetDialog,
+    closePlanetDialog,
+    closeOverlays,
     setNotice,
     importProject,
   } = useEditorStore()
 
+  const workspace = workspaces[activeMode]
+  const {
+    layers,
+    gears,
+    activeLayerId,
+    selectedGearId,
+    draftGear,
+    toothInput,
+    isPlaying,
+    playbackMs,
+    baseAngles,
+    camera,
+    notice,
+    inspector,
+    planetDialog,
+  } = workspace
+  const modeConfig = getModeConfig(activeMode)
+
   const [isPanning, setIsPanning] = useState(false)
+  const [optionalLayerVisibilityByMode, setOptionalLayerVisibilityByMode] = useState(
+    DEFAULT_OPTIONAL_LAYER_VISIBILITY,
+  )
   const svgRef = useRef<SVGSVGElement | null>(null)
   const dialMaskId = useId().replace(/:/g, '-')
+  const orreryArmMaskId = useId().replace(/:/g, '-')
   const fileInputId = useId()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const lastPointerWorldRef = useRef<Point>(getDefaultPlacementPoint())
@@ -441,23 +581,76 @@ export function ClockworkEditor() {
   const placementResultRef = useRef<PlacementResult | null>(null)
   const draftGearRef = useRef(draftGear)
 
-  const activeLayerOrder = activeLayerId
-    ? getLayerById(layers, activeLayerId)?.order ?? null
-    : null
+  const sortedLayers = [...layers].sort((layerA, layerB) => layerA.order - layerB.order)
+  const visibleLayers =
+    activeMode === 'clock' || activeMode === 'orrery'
+      ? layers.filter(
+          (layer) =>
+            getOptionalLayerVisibility(optionalLayerVisibilityByMode, activeMode, layer.id),
+        )
+      : layers
+  const visibleLayerIds = visibleLayers.map((layer) => layer.id)
+  const visibleLayerIdSet = new Set(visibleLayerIds)
+  const visibleOutputs =
+    modeConfig.outputs.filter((output) =>
+      visibleLayers.some((layer) => layer.order === output.layerOrder),
+    )
+  const visibleOutputIds = visibleOutputs.map((output) => output.id)
+  const visibleOutputIdSet = new Set(visibleOutputIds)
+  const visibleOutputsByLayerOrder = new Map(
+    visibleOutputs.map((output) => [output.layerOrder, output] as const),
+  )
+  const visibleGears =
+    activeMode === 'orrery'
+      ? gears.filter((gear) => visibleLayerIdSet.has(gear.layerId))
+      : gears
+  const activeLayerOrder =
+    activeLayerId && visibleLayerIdSet.has(activeLayerId)
+      ? getLayerById(visibleLayers, activeLayerId)?.order ?? null
+      : null
+  const visibleSortedLayers = sortedLayers.filter((layer) => visibleLayerIdSet.has(layer.id))
+
+  useEffect(() => {
+    if (activeMode !== 'orrery') {
+      return
+    }
+
+    if (activeLayerId && !visibleLayerIds.includes(activeLayerId)) {
+      toggleLayer(activeLayerId)
+    }
+  }, [activeLayerId, activeMode, toggleLayer, visibleLayerIds])
+
+  useEffect(() => {
+    if (activeMode !== 'orrery' || !planetDialog) {
+      return
+    }
+
+    if (!visibleOutputIds.includes(planetDialog.outputId as Exclude<AnchorId, 'motor'>)) {
+      closePlanetDialog()
+    }
+  }, [activeMode, closePlanetDialog, planetDialog, visibleOutputIds])
 
   const placementResult =
-    draftGear === null
+    draftGear === null || !visibleLayerIdSet.has(draftGear.layerId)
       ? null
       : resolvePlacement({
+          mode: activeMode,
           draftGear,
-          gears,
-          layers,
+          gears: visibleGears,
+          layers: visibleLayers,
           excludeGearId: draftGear.gearId,
         })
-  const analysis = analyzeClockwork(gears, layers)
+  const analysis = analyzeClockwork(activeMode, visibleGears, visibleLayers, visibleOutputs)
   const parsedTeeth = parseTeethInput(toothInput)
-  const canCreateGear = activeLayerId !== null && parsedTeeth !== null
-  const inspectorGear = inspector ? gears.find((gear) => gear.id === inspector.gearId) ?? null : null
+  const canCreateGear = activeLayerId !== null && visibleLayerIdSet.has(activeLayerId) && parsedTeeth !== null
+  const inspectorGear =
+    inspector ? visibleGears.find((gear) => gear.id === inspector.gearId) ?? null : null
+  const planetDialogOutput =
+    activeMode === 'orrery' &&
+    planetDialog &&
+    visibleOutputIdSet.has(planetDialog.outputId as Exclude<AnchorId, 'motor'>)
+      ? getOutputById(activeMode, planetDialog.outputId as Exclude<AnchorId, 'motor'>)
+      : null
 
   placementResultRef.current = placementResult
   draftGearRef.current = draftGear
@@ -481,8 +674,10 @@ export function ClockworkEditor() {
     if (event.key === 'Escape') {
       if (draftGearRef.current?.mode === 'moving') {
         cancelDraft()
+      } else if (planetDialog) {
+        closePlanetDialog()
       } else {
-        closeInspector()
+        closeOverlays()
       }
     }
 
@@ -502,6 +697,28 @@ export function ClockworkEditor() {
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [])
+
+  useEffect(() => {
+    if (!planetDialog) {
+      return
+    }
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null
+
+      if (
+        target?.closest('[data-planet-dialog="true"]') ||
+        target?.closest('[data-planet-hotspot="true"]')
+      ) {
+        return
+      }
+
+      closePlanetDialog()
+    }
+
+    window.addEventListener('pointerdown', onPointerDown, true)
+    return () => window.removeEventListener('pointerdown', onPointerDown, true)
+  }, [planetDialog, closePlanetDialog])
 
   const handlePointerMove = useEffectEvent((event: PointerEvent) => {
     const svgElement = svgRef.current
@@ -531,11 +748,7 @@ export function ClockworkEditor() {
         setIsPanning(true)
       }
 
-      const delta = createWorldDeltaFromClient(
-        svgElement,
-        clientDeltaX,
-        clientDeltaY,
-      )
+      const delta = createWorldDeltaFromClient(svgElement, clientDeltaX, clientDeltaY)
 
       panInteractionRef.current = {
         ...panInteractionRef.current,
@@ -713,12 +926,23 @@ export function ClockworkEditor() {
   }
 
   function handleExport() {
-    const project = buildProjectSnapshot(layers, gears, camera)
+    const project = buildProjectSnapshot(activeMode, {
+      clock: {
+        layers: workspaces.clock.layers,
+        gears: workspaces.clock.gears,
+        camera: workspaces.clock.camera,
+      },
+      orrery: {
+        layers: workspaces.orrery.layers,
+        gears: workspaces.orrery.gears,
+        camera: workspaces.orrery.camera,
+      },
+    })
     const blob = new Blob([serializeProject(project)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = 'clockwork-atelier-project.json'
+    anchor.download = 'atelier-project.json'
     anchor.click()
     URL.revokeObjectURL(url)
     setNotice({ message: 'Project exported.', variant: 'success' })
@@ -740,7 +964,7 @@ export function ClockworkEditor() {
     }
 
     event.preventDefault()
-    closeInspector()
+    closeOverlays()
     startPlacement(lastPointerWorldRef.current ?? getDefaultPlacementPoint())
     placementInteractionRef.current = {
       pointerId: event.pointerId,
@@ -759,7 +983,7 @@ export function ClockworkEditor() {
   }
 
   function handleStagePointerDown(event: ReactPointerEvent<SVGSVGElement>) {
-    closeInspector()
+    closeOverlays()
 
     const worldPoint = createWorldPointFromClient(
       event.currentTarget,
@@ -836,6 +1060,58 @@ export function ClockworkEditor() {
     }
   }
 
+  function handlePlanetPointerDown(event: ReactPointerEvent<SVGGElement>) {
+    event.stopPropagation()
+
+    if (event.button === 2) {
+      event.preventDefault()
+    }
+  }
+
+  function handlePlanetClick(
+    event: ReactClickEvent<SVGGElement>,
+    output: OutputTarget,
+  ) {
+    event.stopPropagation()
+    openPlanetDialog(output.id, event.clientX, event.clientY)
+  }
+
+  function handlePlanetContextMenu(event: ReactMouseEvent<SVGGElement>) {
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  function handleOptionalLayerToggle(layer: Layer, checked: boolean) {
+    if (!isOptionalLayer(activeMode, layer.id)) {
+      return
+    }
+
+    setOptionalLayerVisibilityByMode((current) => ({
+      ...current,
+      [activeMode]: {
+        ...current[activeMode],
+        [layer.id]: checked,
+      },
+    }))
+
+    if (checked) {
+      return
+    }
+
+    if (draftGear?.layerId === layer.id) {
+      cancelDraft()
+    }
+
+    if (activeLayerId === layer.id) {
+      toggleLayer(layer.id)
+    }
+
+    const output = getOutputForLayer(activeMode, layer.order)
+    if (activeMode === 'orrery' && planetDialog && output && planetDialog.outputId === output.id) {
+      closePlanetDialog()
+    }
+  }
+
   function getGearHighlightState(gearId: string) {
     if (!draftGear || !placementResult) {
       return null
@@ -844,7 +1120,7 @@ export function ClockworkEditor() {
     return placementResult.highlightedGearIds.includes(gearId) ? placementResult.state : null
   }
 
-  function getAnchorHighlightState(anchor: AnchorKind) {
+  function getAnchorHighlightState(anchor: AnchorId) {
     if (!draftGear || !placementResult) {
       return null
     }
@@ -852,24 +1128,19 @@ export function ClockworkEditor() {
     return placementResult.highlightedAnchors.includes(anchor) ? placementResult.state : null
   }
 
-  const dialOpacity = activeLayerOrder === null ? 0.985 : 0.18
-  const sortedLayers = [...layers].sort((layerA, layerB) => layerA.order - layerB.order)
-  const numeralRadius =
-    DIAL_INNER_RADIUS + (DIAL_MIDDLE_RADIUS - DIAL_INNER_RADIUS) * 0.43
-
-  function renderArbor(anchor: Exclude<AnchorKind, 'motor'>, layerOrder: number) {
-    const highlight = getAnchorHighlightState(anchor)
+  function renderArbor(output: OutputTarget, layerOrder: number) {
+    const highlight = getAnchorHighlightState(output.id)
     const strokeStyle = highlight
       ? { opacity: 1, stroke: getHighlightColor(highlight) }
       : getLayerStrokeStyle(layerOrder, activeLayerOrder)
 
     return (
       <circle
-        key={anchor}
-        cx={CLOCK_CENTER.x}
-        cy={CLOCK_CENTER.y}
-        r={ARBOR_RADII[anchor]}
-        data-testid={`arbor-${anchor}`}
+        key={output.id}
+        cx={output.center.x}
+        cy={output.center.y}
+        r={output.arborRadius}
+        data-testid={`arbor-${output.id}`}
         fill="none"
         opacity={strokeStyle.opacity}
         pointerEvents="none"
@@ -879,8 +1150,208 @@ export function ClockworkEditor() {
     )
   }
 
+  function renderClockHand({
+    output,
+    handLength,
+    tailLength = 0,
+    strokeWidth,
+    testId,
+  }: {
+    output: OutputTarget
+    handLength: number
+    tailLength?: number
+    strokeWidth: number
+    testId: string
+  }) {
+    return (
+      <line
+        data-testid={testId}
+        x1={output.center.x}
+        y1={output.center.y + tailLength}
+        x2={output.center.x}
+        y2={output.center.y - handLength}
+        stroke="var(--ink)"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        transform={`rotate(${getAnimatedAngle(baseAngles[output.id] ?? 0, analysis.outputStates[output.id]?.rpm ?? null, playbackMs, isPlaying)} ${output.center.x} ${output.center.y})`}
+      />
+    )
+  }
+
+  function renderAmPmDial(output: OutputTarget) {
+    const radius = CLOCK_COMPLICATION_DIAL_RADIUS
+    const sunY = output.center.y - radius * 0.42
+    const moonY = output.center.y + radius * 0.42
+
+    return (
+      <g data-testid="am-pm-dial">
+        <circle
+          cx={output.center.x}
+          cy={output.center.y}
+          r={radius}
+          fill="var(--paper)"
+          stroke="var(--dial-strong)"
+          strokeWidth={2.2}
+        />
+        <circle
+          cx={output.center.x}
+          cy={output.center.y}
+          r={radius * 0.76}
+          fill="none"
+          stroke="var(--dial-medium)"
+          strokeWidth={1.2}
+        />
+        <line
+          x1={output.center.x - radius * 0.76}
+          y1={output.center.y}
+          x2={output.center.x + radius * 0.76}
+          y2={output.center.y}
+          stroke="var(--dial-medium)"
+          strokeWidth={1.5}
+        />
+        <circle
+          cx={output.center.x}
+          cy={sunY}
+          r={radius * 0.12}
+          fill="none"
+          stroke="var(--ink)"
+          strokeWidth={1.2}
+        />
+        {Array.from({ length: 8 }, (_, index) => {
+          const angle = (Math.PI * 2 * index) / 8
+          const innerPoint = getPointOnCircle(
+            { x: output.center.x, y: sunY },
+            radius * 0.17,
+            angle,
+          )
+          const outerPoint = getPointOnCircle(
+            { x: output.center.x, y: sunY },
+            radius * 0.25,
+            angle,
+          )
+          return (
+            <line
+              key={`am-pm-ray-${index}`}
+              x1={innerPoint.x}
+              y1={innerPoint.y}
+              x2={outerPoint.x}
+              y2={outerPoint.y}
+              stroke="var(--ink)"
+              strokeWidth={1}
+            />
+          )
+        })}
+        <circle
+          cx={output.center.x}
+          cy={moonY}
+          r={radius * 0.15}
+          fill="var(--ink)"
+        />
+        <circle
+          cx={output.center.x + radius * 0.06}
+          cy={moonY - radius * 0.03}
+          r={radius * 0.14}
+          fill="var(--paper)"
+        />
+      </g>
+    )
+  }
+
+  function renderDayDial(output: OutputTarget) {
+    const radius = CLOCK_COMPLICATION_DIAL_RADIUS
+
+    return (
+      <g data-testid="day-dial">
+        <circle
+          cx={output.center.x}
+          cy={output.center.y}
+          r={radius}
+          fill="var(--paper)"
+          stroke="var(--dial-strong)"
+          strokeWidth={2.2}
+        />
+        <circle
+          cx={output.center.x}
+          cy={output.center.y}
+          r={CLOCK_DAY_INNER_RING_RADIUS}
+          fill="none"
+          stroke="var(--dial-medium)"
+          strokeWidth={1.2}
+        />
+        {Array.from({ length: WEEKDAY_NAMES.length }, (_, index) => {
+          const angle = (Math.PI * 2 * (index + 0.5)) / WEEKDAY_NAMES.length - Math.PI / 2
+          const innerPoint = getPointOnCircle(output.center, CLOCK_DAY_INNER_RING_RADIUS + 4, angle)
+          const outerPoint = getPointOnCircle(output.center, radius - 8, angle)
+          return (
+            <line
+              key={`day-separator-${index}`}
+              x1={innerPoint.x}
+              y1={innerPoint.y}
+              x2={outerPoint.x}
+              y2={outerPoint.y}
+              stroke="var(--dial-medium)"
+              strokeWidth={1}
+            />
+          )
+        })}
+        {WEEKDAY_NAMES.map((dayName, index) => {
+          const angle = (Math.PI * 2 * index) / WEEKDAY_NAMES.length - Math.PI / 2
+          const point = getPointOnCircle(output.center, CLOCK_DAY_LABEL_RADIUS, angle)
+          const rotation = (angle * 180) / Math.PI + 90
+          return (
+            <text
+              key={`day-label-${dayName}`}
+              x={point.x}
+              y={point.y}
+              dominantBaseline="middle"
+              fill="var(--ink)"
+              fontFamily="'Times New Roman', Times, serif"
+              fontSize={11}
+              letterSpacing="0.01em"
+              textAnchor="middle"
+              transform={`rotate(${rotation} ${point.x} ${point.y})`}
+            >
+              {dayName}
+            </text>
+          )
+        })}
+      </g>
+    )
+  }
+
+  const dialOpacity = activeLayerOrder === null ? 0.985 : 0.18
+  const showOrreryOverlay = activeLayerOrder === null
+  const orreryArmOpacity = showOrreryOverlay ? 1 : 0.18
+  const orreryPlanetOpacity = showOrreryOverlay ? 1 : 0.2
+  const numeralRadius =
+    DIAL_INNER_RADIUS + (DIAL_MIDDLE_RADIUS - DIAL_INNER_RADIUS) * 0.43
+  const visibleClockOutputsById = new Map(
+    visibleOutputs.map((output) => [output.id, output] as const),
+  )
+
+  const orreryVisuals =
+    activeMode === 'orrery'
+      ? visibleOutputs.map((output) => {
+          const angleDegrees = getAnimatedAngle(
+            baseAngles[output.id] ?? 0,
+            analysis.outputStates[output.id]?.rpm ?? null,
+            playbackMs,
+            isPlaying,
+          )
+          const point = getPointOnOrbit(output.orbitRadius ?? 0, angleDegrees)
+          const size = PLANET_SIZES[output.assetId ?? 'earth'] ?? 76
+
+          return {
+            output,
+            angleDegrees,
+            point,
+            size,
+          }
+        })
+      : []
+
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-mode={modeConfig.theme}>
       <section className="workspace-panel">
         <div className="workspace-frame">
           {analysis.status ? (
@@ -897,10 +1368,7 @@ export function ClockworkEditor() {
             <div
               className="inspector"
               data-testid="gear-inspector"
-              style={{
-                left: Math.min(inspector.screenX + 12, window.innerWidth - 250),
-                top: Math.min(inspector.screenY + 12, window.innerHeight - 140),
-              }}
+              style={getSafeWindowPosition(inspector.screenX, inspector.screenY, 250, 140)}
             >
               <h3>Gear {inspectorGear.id}</h3>
               <p>Teeth: {inspectorGear.teeth}</p>
@@ -914,10 +1382,27 @@ export function ClockworkEditor() {
             </div>
           ) : null}
 
+          {planetDialog && planetDialogOutput ? (
+            <div
+              aria-label={`${planetDialogOutput.label} target period`}
+              className="planet-dialog"
+              data-planet-dialog="true"
+              data-testid="planet-dialog"
+              role="dialog"
+              style={getSafeWindowPosition(planetDialog.screenX, planetDialog.screenY, 260, 150)}
+            >
+              <h3>{planetDialogOutput.label}</h3>
+              <p>
+                Target rate: {formatRpmFraction(planetDialogOutput.targetRpm)}
+              </p>
+            </div>
+          ) : null}
+
           <svg
             ref={svgRef}
             className="workspace-svg"
             data-panning={isPanning}
+            data-testid="workspace-svg"
             viewBox={getViewBox(camera)}
             onContextMenu={(event) => event.preventDefault()}
             onPointerDown={handleStagePointerDown}
@@ -933,30 +1418,51 @@ export function ClockworkEditor() {
                 <path
                   d="M 40 0 L 0 0 0 40"
                   fill="none"
-                  stroke="rgba(31, 33, 34, 0.07)"
+                  stroke="var(--grid-line)"
                   strokeWidth="1"
                 />
               </pattern>
               <mask
                 id={dialMaskId}
                 maskUnits="userSpaceOnUse"
-                x={CLOCK_CENTER.x - DIAL_OUTER_RADIUS}
-                y={CLOCK_CENTER.y - DIAL_OUTER_RADIUS}
+                x={WORKSPACE_CENTER.x - DIAL_OUTER_RADIUS}
+                y={WORKSPACE_CENTER.y - DIAL_OUTER_RADIUS}
                 width={DIAL_OUTER_RADIUS * 2}
                 height={DIAL_OUTER_RADIUS * 2}
               >
                 <circle
-                  cx={CLOCK_CENTER.x}
-                  cy={CLOCK_CENTER.y}
+                  cx={WORKSPACE_CENTER.x}
+                  cy={WORKSPACE_CENTER.y}
                   r={DIAL_OUTER_RADIUS}
                   fill="white"
                 />
                 <circle
-                  cx={CLOCK_CENTER.x}
-                  cy={CLOCK_CENTER.y}
+                  cx={WORKSPACE_CENTER.x}
+                  cy={WORKSPACE_CENTER.y}
                   r={DIAL_INNER_RADIUS}
                   fill="black"
                 />
+              </mask>
+              <mask
+                id={orreryArmMaskId}
+                maskUnits="userSpaceOnUse"
+                x={camera.panX - WORLD_WIDTH / 2}
+                y={camera.panY - WORLD_HEIGHT / 2}
+                width={WORLD_WIDTH}
+                height={WORLD_HEIGHT}
+              >
+                <rect
+                  x={camera.panX - WORLD_WIDTH / 2}
+                  y={camera.panY - WORLD_HEIGHT / 2}
+                  width={WORLD_WIDTH}
+                  height={WORLD_HEIGHT}
+                  fill="white"
+                />
+                {activeMode === 'orrery'
+                  ? orreryVisuals.map(({ output, point, size }) =>
+                      renderPlanetOccluder(output, point, size, 'black'),
+                    )
+                  : null}
               </mask>
             </defs>
 
@@ -977,7 +1483,11 @@ export function ClockworkEditor() {
                 rx={9}
                 ry={9}
                 fill="transparent"
-                stroke={getAnchorHighlightState('motor') ? getHighlightColor(getAnchorHighlightState('motor')!) : 'var(--ink)'}
+                stroke={
+                  getAnchorHighlightState('motor')
+                    ? getHighlightColor(getAnchorHighlightState('motor')!)
+                    : 'var(--ink)'
+                }
                 strokeWidth={2}
               />
               <circle
@@ -985,191 +1495,332 @@ export function ClockworkEditor() {
                 cy={MOTOR_CENTER.y}
                 r={MOTOR_AXLE_RADIUS}
                 fill="var(--paper)"
-                stroke={getAnchorHighlightState('motor') ? getHighlightColor(getAnchorHighlightState('motor')!) : 'var(--ink)'}
+                stroke={
+                  getAnchorHighlightState('motor')
+                    ? getHighlightColor(getAnchorHighlightState('motor')!)
+                    : 'var(--ink)'
+                }
                 strokeWidth={2}
               />
             </g>
 
-            <g>{renderArbor('secondArbor', 1)}</g>
+            {visibleSortedLayers.map((layer) => {
+              const output = visibleOutputsByLayerOrder.get(layer.order) ?? null
+              return (
+                <g key={layer.id} data-testid={`layer-group-${layer.order}`}>
+                  {visibleGears
+                    .filter(
+                      (gear) =>
+                        gear.layerId === layer.id &&
+                        !(draftGear?.mode === 'moving' && draftGear.gearId === gear.id),
+                    )
+                    .map((gear) => (
+                      <GearGlyph
+                        key={gear.id}
+                        gear={gear}
+                        layer={layer}
+                        activeLayerOrder={activeLayerOrder}
+                        computedState={analysis.computedByGearId[gear.id] ?? null}
+                        playbackMs={playbackMs}
+                        isPlaying={isPlaying}
+                        isSelected={selectedGearId === gear.id}
+                        isDraft={false}
+                        highlightState={getGearHighlightState(gear.id)}
+                        onPointerDown={
+                          gear.layerId === activeLayerId ? (event) => handleGearPointerDown(event, gear) : undefined
+                        }
+                        pointerEvents={
+                          draftGear?.mode === 'placing'
+                            ? 'none'
+                            : gear.layerId === activeLayerId
+                              ? 'auto'
+                              : 'none'
+                        }
+                      />
+                    ))}
 
-            {sortedLayers.map((layer) => (
-              <g key={layer.id} data-testid={`layer-group-${layer.order}`}>
-                {gears
-                  .filter(
-                    (gear) =>
-                      gear.layerId === layer.id &&
-                      !(draftGear?.mode === 'moving' && draftGear.gearId === gear.id),
-                  )
-                  .map((gear) => (
+                  {draftGear && draftGear.layerId === layer.id ? (
                     <GearGlyph
-                      key={gear.id}
-                      gear={gear}
+                      gear={{
+                        id: draftGear.gearId ?? 'draft',
+                        teeth: draftGear.teeth,
+                        layerId: draftGear.layerId,
+                        center: placementResult?.center ?? draftGear.center,
+                      }}
                       layer={layer}
                       activeLayerOrder={activeLayerOrder}
-                      computedState={analysis.computedByGearId[gear.id] ?? null}
-                      playbackMs={playbackMs}
-                      isPlaying={isPlaying}
-                      isSelected={selectedGearId === gear.id}
-                      isDraft={false}
-                      highlightState={getGearHighlightState(gear.id)}
-                      onPointerDown={
-                        gear.layerId === activeLayerId ? (event) => handleGearPointerDown(event, gear) : undefined
-                      }
-                      pointerEvents={
-                        draftGear?.mode === 'placing'
-                          ? 'none'
-                          : gear.layerId === activeLayerId
-                            ? 'auto'
-                            : 'none'
-                      }
+                      computedState={null}
+                      playbackMs={0}
+                      isPlaying={false}
+                      isSelected={false}
+                      isDraft={true}
+                      highlightState={placementResult?.state ?? 'free'}
+                      pointerEvents="none"
+                    />
+                  ) : null}
+
+                  {output ? renderArbor(output, layer.order) : null}
+                </g>
+              )
+            })}
+
+            {activeMode === 'clock' ? (
+              <>
+                <g opacity={dialOpacity} pointerEvents="none">
+                  <circle
+                    cx={WORKSPACE_CENTER.x}
+                    cy={WORKSPACE_CENTER.y}
+                    r={DIAL_OUTER_RADIUS}
+                    data-testid="dial-ring-fill"
+                    fill="var(--paper)"
+                    mask={`url(#${dialMaskId})`}
+                  />
+                  <circle
+                    cx={WORKSPACE_CENTER.x}
+                    cy={WORKSPACE_CENTER.y}
+                    r={DIAL_OUTER_RADIUS}
+                    fill="none"
+                    stroke="var(--dial-strong)"
+                    strokeWidth={3}
+                  />
+                  <circle
+                    cx={WORKSPACE_CENTER.x}
+                    cy={WORKSPACE_CENTER.y}
+                    r={DIAL_MIDDLE_RADIUS}
+                    fill="none"
+                    stroke="var(--dial-medium)"
+                    strokeWidth={2.25}
+                  />
+                  <circle
+                    cx={WORKSPACE_CENTER.x}
+                    cy={WORKSPACE_CENTER.y}
+                    r={DIAL_INNER_RADIUS}
+                    fill="none"
+                    stroke="var(--dial-strong)"
+                    strokeWidth={2.25}
+                  />
+                  {Array.from({ length: 60 }, (_, index) => {
+                    const angle = (Math.PI * 2 * index) / 60 - Math.PI / 2
+                    const x1 = Math.cos(angle) * DIAL_MIDDLE_RADIUS
+                    const y1 = Math.sin(angle) * DIAL_MIDDLE_RADIUS
+                    const x2 = Math.cos(angle) * DIAL_OUTER_RADIUS
+                    const y2 = Math.sin(angle) * DIAL_OUTER_RADIUS
+                    return (
+                      <line
+                        key={`dial-minute-${index}`}
+                        x1={x1}
+                        y1={y1}
+                        x2={x2}
+                        y2={y2}
+                        stroke={index % 5 === 0 ? 'var(--dial-medium)' : 'var(--dial-faint)'}
+                        strokeWidth={index % 5 === 0 ? 1.7 : 1}
+                      />
+                    )
+                  })}
+                  {ROMAN_NUMERALS.map((numeral, index) => {
+                    const angle = (Math.PI * 2 * index) / 12 - Math.PI / 2
+                    const x = Math.cos(angle) * numeralRadius
+                    const y = Math.sin(angle) * numeralRadius
+                    const rotation = (angle * 180) / Math.PI + 90
+                    return (
+                      <text
+                        key={`dial-numeral-${numeral}`}
+                        data-testid={`dial-numeral-${numeral}`}
+                        x={x}
+                        y={y}
+                        dominantBaseline="middle"
+                        fill="var(--ink)"
+                        fontFamily="'Iowan Old Style', 'Palatino Linotype', Georgia, serif"
+                        fontSize={50}
+                        fontWeight={400}
+                        letterSpacing="0.02em"
+                        textAnchor="middle"
+                        transform={`rotate(${rotation} ${x} ${y})`}
+                      >
+                        {numeral}
+                      </text>
+                    )
+                  })}
+                  {visibleClockOutputsById.has('amPmArbor')
+                    ? renderAmPmDial(visibleClockOutputsById.get('amPmArbor')!)
+                    : null}
+                  {visibleClockOutputsById.has('dayArbor')
+                    ? renderDayDial(visibleClockOutputsById.get('dayArbor')!)
+                    : null}
+                </g>
+
+                <g opacity={dialOpacity} pointerEvents="none">
+                  {visibleClockOutputsById.has('hourArbor')
+                    ? renderClockHand({
+                        output: visibleClockOutputsById.get('hourArbor')!,
+                        handLength: 140,
+                        strokeWidth: 8,
+                        testId: 'hour-hand',
+                      })
+                    : null}
+                  {visibleClockOutputsById.has('minuteArbor')
+                    ? renderClockHand({
+                        output: visibleClockOutputsById.get('minuteArbor')!,
+                        handLength: 215,
+                        strokeWidth: 5.5,
+                        testId: 'minute-hand',
+                      })
+                    : null}
+                  {visibleClockOutputsById.has('secondArbor')
+                    ? renderClockHand({
+                        output: visibleClockOutputsById.get('secondArbor')!,
+                        handLength: 280,
+                        tailLength: 28,
+                        strokeWidth: 3,
+                        testId: 'second-hand',
+                      })
+                    : null}
+                  {visibleClockOutputsById.has('amPmArbor')
+                    ? renderClockHand({
+                        output: visibleClockOutputsById.get('amPmArbor')!,
+                        handLength: CLOCK_AM_PM_HAND_LENGTH,
+                        strokeWidth: 4,
+                        testId: 'am-pm-hand',
+                      })
+                    : null}
+                  {visibleClockOutputsById.has('dayArbor')
+                    ? renderClockHand({
+                        output: visibleClockOutputsById.get('dayArbor')!,
+                        handLength: CLOCK_DAY_HAND_LENGTH,
+                        strokeWidth: 4,
+                        testId: 'day-hand',
+                      })
+                    : null}
+                  {Array.from(visibleClockOutputsById.values()).map((output) => (
+                    <circle
+                      key={`clock-hand-cap-${output.id}`}
+                      cx={output.center.x}
+                      cy={output.center.y}
+                      r={output.id === 'secondArbor' ? 5 : 4}
+                      fill="var(--ink)"
                     />
                   ))}
-
-                {draftGear && draftGear.layerId === layer.id ? (
-                  <GearGlyph
-                    gear={{
-                      id: draftGear.gearId ?? 'draft',
-                      teeth: draftGear.teeth,
-                      layerId: draftGear.layerId,
-                      center: placementResult?.center ?? draftGear.center,
-                    }}
-                    layer={layer}
-                    activeLayerOrder={activeLayerOrder}
-                    computedState={null}
-                    playbackMs={0}
-                    isPlaying={false}
-                    isSelected={false}
-                    isDraft={true}
-                    highlightState={placementResult?.state ?? 'free'}
+                </g>
+              </>
+            ) : (
+              <g className="orrery-scene" data-testid="orrery-overlay">
+                {showOrreryOverlay ? (
+                  <g
+                    className="orrery-arm-occluders"
+                    mask={`url(#${orreryArmMaskId})`}
                     pointerEvents="none"
-                  />
+                  >
+                    {orreryVisuals.map(({ output, angleDegrees, size }) => {
+                      const angle = ((angleDegrees - 90) * Math.PI) / 180
+                      const outerRadius = Math.max(
+                        output.arborRadius + 14,
+                        (output.orbitRadius ?? 0) - size * 0.18,
+                      )
+                      return (
+                        <path
+                          key={`arm-occluder-${output.id}`}
+                          d={createArmPath(
+                            WORKSPACE_CENTER,
+                            output.arborRadius,
+                            outerRadius,
+                            angle,
+                            Math.max(4.5, 9 - output.layerOrder * 0.6),
+                          )}
+                          fill="var(--orrery-arm-occluder)"
+                        />
+                      )
+                    })}
+                  </g>
                 ) : null}
 
-                {layer.order >= 2 && layer.order <= 3
-                  ? renderArbor(ARBOR_BY_LAYER_ORDER[layer.order], layer.order)
-                  : null}
+                <g
+                  className="orrery-arms"
+                  mask={`url(#${orreryArmMaskId})`}
+                  opacity={orreryArmOpacity}
+                  pointerEvents="none"
+                >
+                  {orreryVisuals.map(({ output, angleDegrees, size }) => {
+                    const angle = ((angleDegrees - 90) * Math.PI) / 180
+                    const outerRadius = Math.max(
+                      output.arborRadius + 14,
+                      (output.orbitRadius ?? 0) - size * 0.18,
+                    )
+                    return (
+                      <path
+                        key={`arm-${output.id}`}
+                        d={createArmPath(
+                          WORKSPACE_CENTER,
+                          output.arborRadius,
+                          outerRadius,
+                          angle,
+                          Math.max(4.5, 9 - output.layerOrder * 0.6),
+                        )}
+                        fill="var(--orrery-arm-fill)"
+                        stroke="var(--orrery-arm-stroke)"
+                        strokeWidth={1.5}
+                      />
+                    )
+                  })}
+                </g>
+
+                {showOrreryOverlay ? (
+                  <g className="orrery-planet-occluders" pointerEvents="none">
+                    {orreryVisuals.map(({ output, point, size }) =>
+                      renderPlanetOccluder(output, point, size, 'var(--orrery-planet-occluder)'),
+                    )}
+                  </g>
+                ) : null}
+
+                <g
+                  className="orrery-planets"
+                  opacity={orreryPlanetOpacity}
+                  pointerEvents={showOrreryOverlay ? 'auto' : 'none'}
+                >
+                  {orreryVisuals.map(({ output, point, size }) => {
+                    const assetId = (output.assetId ?? 'earth') as keyof typeof PLANET_ASSETS
+                    const href = PLANET_ASSETS[assetId]
+
+                    return (
+                      <g
+                        key={output.id}
+                        data-planet-hotspot={showOrreryOverlay ? 'true' : undefined}
+                        data-testid={`planet-${output.id}`}
+                        onClick={showOrreryOverlay ? (event) => handlePlanetClick(event, output) : undefined}
+                        onContextMenu={showOrreryOverlay ? handlePlanetContextMenu : undefined}
+                        onPointerDown={showOrreryOverlay ? handlePlanetPointerDown : undefined}
+                      >
+                        <image
+                          href={href}
+                          x={point.x - size / 2}
+                          y={point.y - size / 2}
+                          width={size}
+                          height={size}
+                          opacity={1}
+                          preserveAspectRatio="xMidYMid meet"
+                        />
+                      </g>
+                    )
+                  })}
+                </g>
+
+                {showOrreryOverlay ? renderSunGlyph() : null}
               </g>
-            ))}
-
-            <g opacity={dialOpacity} pointerEvents="none">
-              <circle
-                cx={CLOCK_CENTER.x}
-                cy={CLOCK_CENTER.y}
-                r={DIAL_OUTER_RADIUS}
-                data-testid="dial-ring-fill"
-                fill="var(--paper)"
-                mask={`url(#${dialMaskId})`}
-              />
-              <circle
-                cx={CLOCK_CENTER.x}
-                cy={CLOCK_CENTER.y}
-                r={DIAL_OUTER_RADIUS}
-                fill="none"
-                stroke="rgba(31, 33, 34, 0.68)"
-                strokeWidth={3}
-              />
-              <circle
-                cx={CLOCK_CENTER.x}
-                cy={CLOCK_CENTER.y}
-                r={DIAL_MIDDLE_RADIUS}
-                fill="none"
-                stroke="rgba(31, 33, 34, 0.58)"
-                strokeWidth={2.25}
-              />
-              <circle
-                cx={CLOCK_CENTER.x}
-                cy={CLOCK_CENTER.y}
-                r={DIAL_INNER_RADIUS}
-                fill="none"
-                stroke="rgba(31, 33, 34, 0.6)"
-                strokeWidth={2.25}
-              />
-              {Array.from({ length: 60 }, (_, index) => {
-                const angle = (Math.PI * 2 * index) / 60 - Math.PI / 2
-                const x1 = Math.cos(angle) * DIAL_MIDDLE_RADIUS
-                const y1 = Math.sin(angle) * DIAL_MIDDLE_RADIUS
-                const x2 = Math.cos(angle) * DIAL_OUTER_RADIUS
-                const y2 = Math.sin(angle) * DIAL_OUTER_RADIUS
-                return (
-                  <line
-                    key={`dial-minute-${index}`}
-                    x1={x1}
-                    y1={y1}
-                    x2={x2}
-                    y2={y2}
-                    stroke={index % 5 === 0 ? 'rgba(31, 33, 34, 0.52)' : 'rgba(31, 33, 34, 0.26)'}
-                    strokeWidth={index % 5 === 0 ? 1.7 : 1}
-                  />
-                )
-              })}
-              {ROMAN_NUMERALS.map((numeral, index) => {
-                const angle = (Math.PI * 2 * index) / 12 - Math.PI / 2
-                const x = Math.cos(angle) * numeralRadius
-                const y = Math.sin(angle) * numeralRadius
-                const rotation = (angle * 180) / Math.PI + 90
-                return (
-                  <text
-                    key={`dial-numeral-${numeral}`}
-                    data-testid={`dial-numeral-${numeral}`}
-                    x={x}
-                    y={y}
-                    dominantBaseline="middle"
-                    fill="rgba(0, 0, 0, 0.92)"
-                    fontFamily="'Iowan Old Style', 'Palatino Linotype', Georgia, serif"
-                    fontSize={50}
-                    fontWeight={400}
-                    letterSpacing="0.02em"
-                    textAnchor="middle"
-                    transform={`rotate(${rotation} ${x} ${y})`}
-                  >
-                    {numeral}
-                  </text>
-                )
-              })}
-            </g>
-
-            <g opacity={dialOpacity} pointerEvents="none">
-              <line
-                x1={CLOCK_CENTER.x}
-                y1={CLOCK_CENTER.y}
-                x2={CLOCK_CENTER.x}
-                y2={CLOCK_CENTER.y - 140}
-                stroke="var(--ink)"
-                strokeWidth={8}
-                strokeLinecap="round"
-                transform={`rotate(${getAnimatedHandAngle(handBaseAngles.hourArbor, analysis.handStates.hourArbor.rpm, playbackMs, isPlaying)} 0 0)`}
-              />
-              <line
-                x1={CLOCK_CENTER.x}
-                y1={CLOCK_CENTER.y}
-                x2={CLOCK_CENTER.x}
-                y2={CLOCK_CENTER.y - 215}
-                stroke="var(--ink)"
-                strokeWidth={5.5}
-                strokeLinecap="round"
-                transform={`rotate(${getAnimatedHandAngle(handBaseAngles.minuteArbor, analysis.handStates.minuteArbor.rpm, playbackMs, isPlaying)} 0 0)`}
-              />
-              <line
-                x1={CLOCK_CENTER.x}
-                y1={CLOCK_CENTER.y + 28}
-                x2={CLOCK_CENTER.x}
-                y2={CLOCK_CENTER.y - 280}
-                stroke="var(--ink)"
-                strokeWidth={3}
-                strokeLinecap="round"
-                transform={`rotate(${getAnimatedHandAngle(handBaseAngles.secondArbor, analysis.handStates.secondArbor.rpm, playbackMs, isPlaying)} 0 0)`}
-              />
-              <circle cx={0} cy={0} r={5} fill="var(--ink)" />
-            </g>
+            )}
           </svg>
-
-          <div className="workspace-caption">Drag empty canvas to pan</div>
         </div>
       </section>
 
       <aside className="sidebar">
-        <div className="panel">
-          <h1>Clockwork Atelier</h1>
+        <div className="panel title-panel">
+          <button
+            className="title-toggle"
+            data-testid="mode-toggle"
+            onClick={() => switchMode()}
+            type="button"
+          >
+            <span>{modeConfig.title}</span>
+            <small>Switch scene</small>
+          </button>
         </div>
 
         <div className="panel">
@@ -1216,28 +1867,52 @@ export function ClockworkEditor() {
         </div>
 
         <div className="panel">
-          <h2>Layers</h2>
+          <h2>{modeConfig.layerSectionTitle}</h2>
           <div className="layer-list">
-            {sortedLayers.map((layer) => (
+            {sortedLayers.map((layer) => {
+              const layerEnabled =
+                getOptionalLayerVisibility(optionalLayerVisibilityByMode, activeMode, layer.id)
+
+              return (
+                <div
+                  key={layer.id}
+                  className="layer-row"
+                  data-optional={isOptionalLayer(activeMode, layer.id)}
+                >
+                  <button
+                    className="layer-button"
+                    data-active={activeLayerId === layer.id && layerEnabled}
+                    data-disabled={!layerEnabled}
+                    data-testid={`layer-button-${layer.order}`}
+                    disabled={!layerEnabled}
+                    onClick={() => toggleLayer(layer.id)}
+                    type="button"
+                  >
+                    {layer.name}
+                  </button>
+                  {isOptionalLayer(activeMode, layer.id) ? (
+                    <input
+                      aria-label={`Enable ${layer.name}`}
+                      checked={layerEnabled}
+                      className="layer-checkbox"
+                      data-testid={`layer-checkbox-${layer.order}`}
+                      onChange={(event) => handleOptionalLayerToggle(layer, event.target.checked)}
+                      type="checkbox"
+                    />
+                  ) : null}
+                </div>
+              )
+            })}
+            {modeConfig.allowAddLayer ? (
               <button
-                key={layer.id}
                 className="layer-button"
-                data-active={activeLayerId === layer.id}
-                data-testid={`layer-button-${layer.order}`}
-                onClick={() => toggleLayer(layer.id)}
+                data-testid="new-layer-button"
+                onClick={() => addLayer()}
                 type="button"
               >
-                {layer.name}
+                New Layer
               </button>
-            ))}
-            <button
-              className="layer-button"
-              data-testid="new-layer-button"
-              onClick={() => addLayer()}
-              type="button"
-            >
-              New Layer
-            </button>
+            ) : null}
           </div>
         </div>
 

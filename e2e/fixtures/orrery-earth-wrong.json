@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "activeMode": "orrery",
+  "clock": {
+    "layers": [
+      { "id": "layer-1", "name": "Second Hand Layer", "order": 1 },
+      { "id": "layer-2", "name": "Minute Hand Layer", "order": 2 },
+      { "id": "layer-3", "name": "Hour Hand Layer", "order": 3 }
+    ],
+    "gears": [],
+    "camera": { "panX": 0, "panY": 0 }
+  },
+  "orrery": {
+    "layers": [
+      { "id": "layer-1", "name": "Mercury", "order": 1 },
+      { "id": "layer-2", "name": "Venus", "order": 2 },
+      { "id": "layer-3", "name": "Earth", "order": 3 },
+      { "id": "layer-4", "name": "Mars", "order": 4 },
+      { "id": "layer-5", "name": "Jupiter", "order": 5 },
+      { "id": "layer-6", "name": "Saturn", "order": 6 }
+    ],
+    "gears": [
+      {
+        "id": "gear-1",
+        "teeth": 182,
+        "layerId": "layer-3",
+        "center": { "x": -440, "y": 280 }
+      },
+      {
+        "id": "gear-2",
+        "teeth": 182,
+        "layerId": "layer-3",
+        "center": { "x": 0, "y": 0 }
+      }
+    ],
+    "camera": { "panX": 0, "panY": 0 }
+  }
+}

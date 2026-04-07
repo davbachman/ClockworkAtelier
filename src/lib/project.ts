@@ -1,6 +1,13 @@
 import { z } from 'zod'
-import { MAX_TEETH, MIN_TEETH } from './constants'
-import type { ClockworkProjectV1, Gear, Layer } from './types'
+import { MAX_TEETH, MIN_TEETH, MODE_CONFIGS } from './constants'
+import type {
+  AtelierProjectV2,
+  ClockworkProjectV1,
+  EditorMode,
+  Gear,
+  Layer,
+  WorkspaceProjectSlice,
+} from './types'
 
 const pointSchema = z.object({
   x: z.number().finite(),
@@ -20,9 +27,8 @@ const gearSchema = z.object({
   center: pointSchema,
 })
 
-const projectSchema = z
+const workspaceSliceSchema = z
   .object({
-    version: z.literal(1),
     layers: z.array(layerSchema).min(1),
     gears: z.array(gearSchema),
     camera: z.object({
@@ -63,23 +69,94 @@ const projectSchema = z
     }
   })
 
-export function parseProjectJson(text: string) {
-  return projectSchema.parse(JSON.parse(text)) satisfies ClockworkProjectV1
+const clockworkProjectV1Schema = workspaceSliceSchema.extend({
+  version: z.literal(1),
+})
+
+const atelierProjectV2Schema = z.object({
+  version: z.literal(2),
+  activeMode: z.enum(['clock', 'orrery']),
+  clock: workspaceSliceSchema,
+  orrery: workspaceSliceSchema,
+})
+
+function cloneLayers(layers: Layer[]) {
+  return layers.map((layer) => ({ ...layer }))
 }
 
-export function serializeProject(project: ClockworkProjectV1) {
-  return JSON.stringify(project, null, 2)
+function createDefaultWorkspaceSlice(mode: EditorMode): WorkspaceProjectSlice {
+  return {
+    layers: cloneLayers(MODE_CONFIGS[mode].layers),
+    gears: [],
+    camera: {
+      panX: 0,
+      panY: 0,
+    },
+  }
 }
 
-export function buildProjectSnapshot(
+function normalizeWorkspaceSlice(
   layers: Layer[],
   gears: Gear[],
-  camera: ClockworkProjectV1['camera'],
-): ClockworkProjectV1 {
+  camera: WorkspaceProjectSlice['camera'],
+): WorkspaceProjectSlice {
   return {
-    version: 1,
     layers: [...layers].sort((layerA, layerB) => layerA.order - layerB.order),
     gears,
     camera,
   }
+}
+
+export function parseProjectJson(text: string) {
+  const raw = JSON.parse(text)
+
+  if (raw?.version === 1) {
+    const project = clockworkProjectV1Schema.parse(raw) satisfies ClockworkProjectV1
+    return {
+      version: 2,
+      activeMode: 'clock',
+      clock: normalizeWorkspaceSlice(project.layers, project.gears, project.camera),
+      orrery: createDefaultWorkspaceSlice('orrery'),
+    } satisfies AtelierProjectV2
+  }
+
+  const project = atelierProjectV2Schema.parse(raw) satisfies AtelierProjectV2
+  return {
+    version: 2,
+    activeMode: project.activeMode,
+    clock: normalizeWorkspaceSlice(project.clock.layers, project.clock.gears, project.clock.camera),
+    orrery: normalizeWorkspaceSlice(
+      project.orrery.layers,
+      project.orrery.gears,
+      project.orrery.camera,
+    ),
+  } satisfies AtelierProjectV2
+}
+
+export function serializeProject(project: AtelierProjectV2) {
+  return JSON.stringify(project, null, 2)
+}
+
+export function buildProjectSnapshot(
+  activeMode: EditorMode,
+  workspaces: Record<EditorMode, WorkspaceProjectSlice>,
+): AtelierProjectV2 {
+  return {
+    version: 2,
+    activeMode,
+    clock: normalizeWorkspaceSlice(
+      workspaces.clock.layers,
+      workspaces.clock.gears,
+      workspaces.clock.camera,
+    ),
+    orrery: normalizeWorkspaceSlice(
+      workspaces.orrery.layers,
+      workspaces.orrery.gears,
+      workspaces.orrery.camera,
+    ),
+  }
+}
+
+export function createEmptyWorkspaceProject(mode: EditorMode) {
+  return createDefaultWorkspaceSlice(mode)
 }

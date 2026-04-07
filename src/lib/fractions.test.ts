@@ -1,17 +1,17 @@
 import { approximateFraction, formatRpmFraction } from './fractions'
 
 describe('fractions', () => {
-  it('formats integer rpm values as fractions', () => {
-    expect(formatRpmFraction(2)).toBe('2/1 rpm')
+  it('formats integer rev/year values as fractions', () => {
+    expect(formatRpmFraction(2)).toBe('2/1 rev/year')
   })
 
-  it('reduces simple fractional rpm values', () => {
-    expect(formatRpmFraction(1 / 60)).toBe('1/60 rpm')
-    expect(formatRpmFraction(1 / 720)).toBe('1/720 rpm')
+  it('reduces simple fractional rev/year values', () => {
+    expect(formatRpmFraction(1 / 60)).toBe('1/60 rev/year')
+    expect(formatRpmFraction(1 / 720)).toBe('1/720 rev/year')
   })
 
-  it('formats negative rpm values as signed fractions', () => {
-    expect(formatRpmFraction(-3 / 2)).toBe('-3/2 rpm')
+  it('formats negative rev/year values as signed fractions', () => {
+    expect(formatRpmFraction(-3 / 2)).toBe('-3/2 rev/year')
   })
 
   it('approximates decimal values with a bounded denominator', () => {

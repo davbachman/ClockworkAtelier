@@ -1,18 +1,13 @@
 import { create } from 'zustand'
-import {
-  BASE_LAYERS,
-  CLOCK_CENTER,
-  HAND_LAYER_NAMES,
-  MAX_TEETH,
-  MIN_TEETH,
-} from '../lib/constants'
-import { createRandomHandAngles, getCurrentTimeHandAngles } from '../lib/hands'
+import { MAX_TEETH, MIN_TEETH, WORKSPACE_CENTER, getLayerName, getModeConfig } from '../lib/constants'
+import { createRandomAngles, createRandomHandAngles, getCurrentTimeHandAngles } from '../lib/hands'
 import { clampTeethCount, getLayerById, subtractPoints } from '../lib/geometry'
 import type {
-  ClockworkProjectV1,
+  AtelierProjectV2,
+  BaseAngleMap,
   DraftGear,
+  EditorMode,
   Gear,
-  HandAngles,
   Layer,
   NoticeState,
   Point,
@@ -24,12 +19,18 @@ interface InspectorState {
   screenY: number
 }
 
+interface PlanetDialogState {
+  outputId: string
+  screenX: number
+  screenY: number
+}
+
 interface CameraState {
   panX: number
   panY: number
 }
 
-interface EditorState {
+export interface WorkspaceState {
   layers: Layer[]
   gears: Gear[]
   activeLayerId: string | null
@@ -38,11 +39,18 @@ interface EditorState {
   toothInput: string
   isPlaying: boolean
   playbackMs: number
-  handBaseAngles: HandAngles
+  baseAngles: BaseAngleMap
   camera: CameraState
   notice: NoticeState | null
   inspector: InspectorState | null
+  planetDialog: PlanetDialogState | null
+}
+
+interface EditorState {
+  activeMode: EditorMode
+  workspaces: Record<EditorMode, WorkspaceState>
   setToothInput: (value: string) => void
+  switchMode: () => void
   toggleLayer: (layerId: string) => void
   addLayer: () => void
   startPlacement: (center: Point) => void
@@ -57,24 +65,50 @@ interface EditorState {
   panBy: (delta: Point) => void
   openInspector: (gearId: string, screenX: number, screenY: number) => void
   closeInspector: () => void
+  openPlanetDialog: (outputId: string, screenX: number, screenY: number) => void
+  closePlanetDialog: () => void
+  closeOverlays: () => void
   setNotice: (notice: NoticeState | null) => void
-  importProject: (project: ClockworkProjectV1) => void
+  importProject: (project: AtelierProjectV2) => void
+}
+
+function createInitialBaseAngles(mode: EditorMode) {
+  if (mode === 'clock') {
+    return createRandomHandAngles()
+  }
+
+  return createRandomAngles(getModeConfig(mode).outputs.map((output) => output.id))
+}
+
+function createWorkspaceData(mode: EditorMode, overrides?: Partial<Pick<WorkspaceState, 'layers' | 'gears' | 'camera'>>): WorkspaceState {
+  const layers = overrides?.layers
+    ? [...overrides.layers].sort((layerA, layerB) => layerA.order - layerB.order)
+    : getModeConfig(mode).layers.map((layer) => ({ ...layer }))
+
+  return {
+    layers,
+    gears: overrides?.gears ?? [],
+    activeLayerId: layers[0]?.id ?? null,
+    selectedGearId: null,
+    draftGear: null,
+    toothInput: '',
+    isPlaying: false,
+    playbackMs: 0,
+    baseAngles: createInitialBaseAngles(mode),
+    camera: overrides?.camera ?? { panX: 0, panY: 0 },
+    notice: null,
+    inspector: null,
+    planetDialog: null,
+  }
 }
 
 function createBaseEditorData() {
   return {
-    layers: [...BASE_LAYERS],
-    gears: [] as Gear[],
-    activeLayerId: 'layer-1' as string | null,
-    selectedGearId: null as string | null,
-    draftGear: null as DraftGear | null,
-    toothInput: '',
-    isPlaying: false,
-    playbackMs: 0,
-    handBaseAngles: createRandomHandAngles(),
-    camera: { panX: 0, panY: 0 },
-    notice: null as NoticeState | null,
-    inspector: null as InspectorState | null,
+    activeMode: 'clock' as EditorMode,
+    workspaces: {
+      clock: createWorkspaceData('clock'),
+      orrery: createWorkspaceData('orrery'),
+    },
   }
 }
 
@@ -100,238 +134,345 @@ function getParsedToothInput(value: string) {
   return parsedValue
 }
 
-function getLayerName(order: number) {
-  return HAND_LAYER_NAMES[order] ?? `Layer ${order}`
+function sanitizeWorkspaceForModeSwitch(workspace: WorkspaceState) {
+  return {
+    ...workspace,
+    draftGear: null,
+    selectedGearId: null,
+    isPlaying: false,
+    playbackMs: 0,
+    inspector: null,
+    planetDialog: null,
+    notice: null,
+  }
+}
+
+function updateActiveWorkspace(
+  state: EditorState,
+  updater: (workspace: WorkspaceState, mode: EditorMode) => Partial<WorkspaceState> | WorkspaceState,
+) {
+  const mode = state.activeMode
+  const currentWorkspace = state.workspaces[mode]
+  const nextWorkspace = updater(currentWorkspace, mode)
+
+  return {
+    workspaces: {
+      ...state.workspaces,
+      [mode]: {
+        ...currentWorkspace,
+        ...nextWorkspace,
+      },
+    },
+  }
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   ...createBaseEditorData(),
   setToothInput: (value) => {
-    set({
-      toothInput: value.replace(/[^\d]/g, ''),
-      notice: null,
+    set((state) =>
+      updateActiveWorkspace(state, () => ({
+        toothInput: value.replace(/[^\d]/g, ''),
+        notice: null,
+      })),
+    )
+  },
+  switchMode: () => {
+    set((state) => {
+      const nextMode: EditorMode = state.activeMode === 'clock' ? 'orrery' : 'clock'
+
+      return {
+        activeMode: nextMode,
+        workspaces: {
+          clock: sanitizeWorkspaceForModeSwitch(state.workspaces.clock),
+          orrery: sanitizeWorkspaceForModeSwitch(state.workspaces.orrery),
+        },
+      }
     })
   },
   toggleLayer: (layerId) => {
-    set((state) => {
-      const nextActiveLayerId = state.activeLayerId === layerId ? null : layerId
-      const selectedGear =
-        state.selectedGearId === null
-          ? null
-          : state.gears.find((gear) => gear.id === state.selectedGearId) ?? null
+    set((state) =>
+      updateActiveWorkspace(state, (workspace) => {
+        const nextActiveLayerId = workspace.activeLayerId === layerId ? null : layerId
+        const selectedGear =
+          workspace.selectedGearId === null
+            ? null
+            : workspace.gears.find((gear) => gear.id === workspace.selectedGearId) ?? null
 
-      return {
-        activeLayerId: nextActiveLayerId,
-        selectedGearId:
-          selectedGear && selectedGear.layerId === nextActiveLayerId ? selectedGear.id : null,
-        inspector: null,
-      }
-    })
+        return {
+          activeLayerId: nextActiveLayerId,
+          selectedGearId:
+            selectedGear && selectedGear.layerId === nextActiveLayerId ? selectedGear.id : null,
+          inspector: null,
+          planetDialog: null,
+        }
+      }),
+    )
   },
   addLayer: () => {
-    set((state) => {
-      const nextOrder = state.layers.reduce((maxValue, layer) => Math.max(maxValue, layer.order), 0) + 1
-      return {
-        layers: [...state.layers, { id: `layer-${nextOrder}`, name: getLayerName(nextOrder), order: nextOrder }],
-        notice: null,
-      }
-    })
+    set((state) =>
+      updateActiveWorkspace(state, (workspace, mode) => {
+        if (!getModeConfig(mode).allowAddLayer) {
+          return workspace
+        }
+
+        const nextOrder =
+          workspace.layers.reduce((maxValue, layer) => Math.max(maxValue, layer.order), 0) + 1
+
+        return {
+          layers: [
+            ...workspace.layers,
+            { id: `layer-${nextOrder}`, name: getLayerName(mode, nextOrder), order: nextOrder },
+          ],
+          notice: null,
+        }
+      }),
+    )
   },
   startPlacement: (center) => {
     const state = get()
-    const teeth = getParsedToothInput(state.toothInput)
+    const workspace = state.workspaces[state.activeMode]
+    const teeth = getParsedToothInput(workspace.toothInput)
 
-    if (teeth === null || state.activeLayerId === null) {
-      set({
-        notice: {
-          message: `Enter ${MIN_TEETH}-${MAX_TEETH} teeth and activate a layer first.`,
-          variant: 'error',
-        },
-      })
+    if (teeth === null || workspace.activeLayerId === null) {
+      set(
+        updateActiveWorkspace(state, () => ({
+          notice: {
+            message: `Enter ${MIN_TEETH}-${MAX_TEETH} teeth and activate a layer first.`,
+            variant: 'error',
+          },
+        })),
+      )
       return
     }
 
-    set({
-      draftGear: {
-        mode: 'placing',
-        gearId: null,
-        layerId: state.activeLayerId,
-        teeth,
-        center,
-        offset: { x: 0, y: 0 },
-        originalCenter: null,
-      },
-      inspector: null,
-      selectedGearId: null,
-      notice: null,
-    })
+    set(
+      updateActiveWorkspace(state, () => ({
+        draftGear: {
+          mode: 'placing',
+          gearId: null,
+          layerId: workspace.activeLayerId!,
+          teeth,
+          center,
+          offset: { x: 0, y: 0 },
+          originalCenter: null,
+        },
+        inspector: null,
+        planetDialog: null,
+        selectedGearId: null,
+        notice: null,
+      })),
+    )
   },
   updateDraftCenter: (center) => {
-    set((state) => {
-      if (!state.draftGear) {
-        return state
-      }
+    set((state) =>
+      updateActiveWorkspace(state, (workspace) => {
+        if (!workspace.draftGear) {
+          return workspace
+        }
 
-      return {
-        draftGear: {
-          ...state.draftGear,
-          center:
-            state.draftGear.mode === 'moving'
-              ? {
-                  x: center.x + state.draftGear.offset.x,
-                  y: center.y + state.draftGear.offset.y,
-                }
-              : center,
-        },
-      }
-    })
+        return {
+          draftGear: {
+            ...workspace.draftGear,
+            center:
+              workspace.draftGear.mode === 'moving'
+                ? {
+                    x: center.x + workspace.draftGear.offset.x,
+                    y: center.y + workspace.draftGear.offset.y,
+                  }
+                : center,
+          },
+        }
+      }),
+    )
   },
   commitDraft: (center) => {
-    set((state) => {
-      if (!state.draftGear) {
-        return state
-      }
+    set((state) =>
+      updateActiveWorkspace(state, (workspace) => {
+        if (!workspace.draftGear) {
+          return workspace
+        }
 
-      if (state.draftGear.mode === 'placing') {
+        if (workspace.draftGear.mode === 'placing') {
+          return {
+            gears: [
+              ...workspace.gears,
+              {
+                id: getNextGearId(workspace.gears),
+                teeth: clampTeethCount(workspace.draftGear.teeth),
+                layerId: workspace.draftGear.layerId,
+                center,
+              },
+            ],
+            draftGear: null,
+            notice: null,
+          }
+        }
+
         return {
-          gears: [
-            ...state.gears,
-            {
-              id: getNextGearId(state.gears),
-              teeth: clampTeethCount(state.draftGear.teeth),
-              layerId: state.draftGear.layerId,
-              center,
-            },
-          ],
+          gears: workspace.gears.map((gear) =>
+            gear.id === workspace.draftGear?.gearId ? { ...gear, center } : gear,
+          ),
           draftGear: null,
+          selectedGearId: workspace.draftGear.gearId,
           notice: null,
         }
-      }
-
-      return {
-        gears: state.gears.map((gear) =>
-          gear.id === state.draftGear?.gearId ? { ...gear, center } : gear,
-        ),
-        draftGear: null,
-        selectedGearId: state.draftGear.gearId,
-        notice: null,
-      }
-    })
+      }),
+    )
   },
   cancelDraft: () => {
-    set((state) => ({
-      draftGear: null,
-      selectedGearId:
-        state.draftGear?.mode === 'moving' && state.draftGear.gearId
-          ? state.draftGear.gearId
-          : state.selectedGearId,
-      notice: null,
-    }))
+    set((state) =>
+      updateActiveWorkspace(state, (workspace) => ({
+        draftGear: null,
+        selectedGearId:
+          workspace.draftGear?.mode === 'moving' && workspace.draftGear.gearId
+            ? workspace.draftGear.gearId
+            : workspace.selectedGearId,
+        notice: null,
+      })),
+    )
   },
   startMoveGear: (gearId, pointer) => {
-    set((state) => {
-      const gear = state.gears.find((currentGear) => currentGear.id === gearId)
-      if (!gear) {
-        return state
-      }
+    set((state) =>
+      updateActiveWorkspace(state, (workspace) => {
+        const gear = workspace.gears.find((currentGear) => currentGear.id === gearId)
+        if (!gear) {
+          return workspace
+        }
 
-      const layer = getLayerById(state.layers, gear.layerId)
-      if (!layer || state.activeLayerId !== gear.layerId) {
-        return state
-      }
+        const layer = getLayerById(workspace.layers, gear.layerId)
+        if (!layer || workspace.activeLayerId !== gear.layerId) {
+          return workspace
+        }
 
-      return {
-        selectedGearId: gear.id,
-        inspector: null,
-        draftGear: {
-          mode: 'moving',
-          gearId: gear.id,
-          layerId: gear.layerId,
-          teeth: gear.teeth,
-          center: gear.center,
-          offset: subtractPoints(gear.center, pointer),
-          originalCenter: gear.center,
-        },
-      }
-    })
+        return {
+          selectedGearId: gear.id,
+          inspector: null,
+          planetDialog: null,
+          draftGear: {
+            mode: 'moving',
+            gearId: gear.id,
+            layerId: gear.layerId,
+            teeth: gear.teeth,
+            center: gear.center,
+            offset: subtractPoints(gear.center, pointer),
+            originalCenter: gear.center,
+          },
+        }
+      }),
+    )
   },
   deleteSelection: () => {
-    set((state) => {
-      if (!state.selectedGearId) {
-        return state
-      }
+    set((state) =>
+      updateActiveWorkspace(state, (workspace) => {
+        if (!workspace.selectedGearId) {
+          return workspace
+        }
 
-      return {
-        gears: state.gears.filter((gear) => gear.id !== state.selectedGearId),
-        selectedGearId: null,
-        draftGear:
-          state.draftGear?.gearId === state.selectedGearId ? null : state.draftGear,
-        inspector:
-          state.inspector?.gearId === state.selectedGearId ? null : state.inspector,
-      }
-    })
+        return {
+          gears: workspace.gears.filter((gear) => gear.id !== workspace.selectedGearId),
+          selectedGearId: null,
+          draftGear:
+            workspace.draftGear?.gearId === workspace.selectedGearId ? null : workspace.draftGear,
+          inspector:
+            workspace.inspector?.gearId === workspace.selectedGearId ? null : workspace.inspector,
+        }
+      }),
+    )
   },
   selectGear: (gearId) => {
-    set({
-      selectedGearId: gearId,
-      inspector: null,
-    })
+    set((state) =>
+      updateActiveWorkspace(state, () => ({
+        selectedGearId: gearId,
+        inspector: null,
+        planetDialog: null,
+      })),
+    )
   },
   togglePlay: (now = new Date()) => {
     set((state) =>
-      state.isPlaying
-        ? {
-            isPlaying: false,
-            inspector: null,
-          }
-        : {
-            isPlaying: true,
-            playbackMs: 0,
-            handBaseAngles: getCurrentTimeHandAngles(now),
-            inspector: null,
-          },
+      updateActiveWorkspace(state, (workspace, mode) =>
+        workspace.isPlaying
+          ? {
+              isPlaying: false,
+              inspector: null,
+              planetDialog: null,
+            }
+          : {
+              isPlaying: true,
+              playbackMs: 0,
+              baseAngles:
+                mode === 'clock'
+                  ? getCurrentTimeHandAngles(now)
+                  : workspace.baseAngles,
+              inspector: null,
+              planetDialog: null,
+            },
+      ),
     )
   },
   setPlaybackMs: (playbackMs) => {
-    set({ playbackMs })
+    set((state) => updateActiveWorkspace(state, () => ({ playbackMs })))
   },
   panBy: (delta) => {
-    set((state) => ({
-      camera: {
-        panX: state.camera.panX - delta.x,
-        panY: state.camera.panY - delta.y,
-      },
-    }))
+    set((state) =>
+      updateActiveWorkspace(state, (workspace) => ({
+        camera: {
+          panX: workspace.camera.panX - delta.x,
+          panY: workspace.camera.panY - delta.y,
+        },
+      })),
+    )
   },
   openInspector: (gearId, screenX, screenY) => {
-    set({
-      inspector: { gearId, screenX, screenY },
-      selectedGearId: gearId,
-    })
+    set((state) =>
+      updateActiveWorkspace(state, () => ({
+        inspector: { gearId, screenX, screenY },
+        planetDialog: null,
+        selectedGearId: gearId,
+      })),
+    )
   },
   closeInspector: () => {
-    set({ inspector: null })
+    set((state) => updateActiveWorkspace(state, () => ({ inspector: null })))
+  },
+  openPlanetDialog: (outputId, screenX, screenY) => {
+    set((state) =>
+      updateActiveWorkspace(state, () => ({
+        planetDialog: { outputId, screenX, screenY },
+        inspector: null,
+      })),
+    )
+  },
+  closePlanetDialog: () => {
+    set((state) => updateActiveWorkspace(state, () => ({ planetDialog: null })))
+  },
+  closeOverlays: () => {
+    set((state) =>
+      updateActiveWorkspace(state, () => ({
+        inspector: null,
+        planetDialog: null,
+      })),
+    )
   },
   setNotice: (notice) => {
-    set({ notice })
+    set((state) => updateActiveWorkspace(state, () => ({ notice })))
   },
   importProject: (project) => {
     set({
-      layers: project.layers as typeof BASE_LAYERS,
-      gears: project.gears,
-      activeLayerId: project.layers[0]?.id ?? null,
-      selectedGearId: null,
-      draftGear: null,
-      isPlaying: false,
-      playbackMs: 0,
-      handBaseAngles: createRandomHandAngles(),
-      camera: project.camera,
-      inspector: null,
-      notice: {
-        message: 'Project imported.',
-        variant: 'success',
+      activeMode: project.activeMode,
+      workspaces: {
+        clock: createWorkspaceData('clock', project.clock),
+        orrery: createWorkspaceData('orrery', project.orrery),
       },
     })
+    set((state) =>
+      updateActiveWorkspace(state, () => ({
+        notice: {
+          message: 'Project imported.',
+          variant: 'success',
+        },
+      })),
+    )
   },
 }))
 
@@ -343,16 +484,24 @@ export function getEditorProjectSnapshot() {
   const state = useEditorStore.getState()
 
   return {
-    version: 1 as const,
-    layers: state.layers,
-    gears: state.gears,
-    camera: state.camera,
+    version: 2 as const,
+    activeMode: state.activeMode,
+    clock: {
+      layers: state.workspaces.clock.layers,
+      gears: state.workspaces.clock.gears,
+      camera: state.workspaces.clock.camera,
+    },
+    orrery: {
+      layers: state.workspaces.orrery.layers,
+      gears: state.workspaces.orrery.gears,
+      camera: state.workspaces.orrery.camera,
+    },
   }
 }
 
 export function getDefaultPlacementPoint() {
   return {
-    x: CLOCK_CENTER.x + 140,
-    y: CLOCK_CENTER.y,
+    x: WORKSPACE_CENTER.x + 140,
+    y: WORKSPACE_CENTER.y,
   }
 }

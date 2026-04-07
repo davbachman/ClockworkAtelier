@@ -16,9 +16,72 @@ export interface Gear {
   center: Point
 }
 
-export type AnchorKind = 'motor' | 'secondArbor' | 'minuteArbor' | 'hourArbor'
-export type HandAnchor = Exclude<AnchorKind, 'motor'>
+export type EditorMode = 'clock' | 'orrery'
+
+export type AnchorId =
+  | 'motor'
+  | 'secondArbor'
+  | 'minuteArbor'
+  | 'hourArbor'
+  | 'amPmArbor'
+  | 'dayArbor'
+  | 'mercuryArbor'
+  | 'venusArbor'
+  | 'earthArbor'
+  | 'marsArbor'
+  | 'jupiterArbor'
+  | 'saturnArbor'
+
+export type AnchorKind = AnchorId
+export type ClockAnchor =
+  | 'secondArbor'
+  | 'minuteArbor'
+  | 'hourArbor'
+  | 'amPmArbor'
+  | 'dayArbor'
+export type OrreryAnchor =
+  | 'mercuryArbor'
+  | 'venusArbor'
+  | 'earthArbor'
+  | 'marsArbor'
+  | 'jupiterArbor'
+  | 'saturnArbor'
+
+export type HandAnchor = ClockAnchor
 export type HandAngles = Record<HandAnchor, number>
+export type BaseAngleMap = Record<string, number>
+
+export interface Fraction {
+  numerator: number
+  denominator: number
+}
+
+export interface OutputTarget {
+  id: Exclude<AnchorId, 'motor'>
+  label: string
+  layerOrder: number
+  targetRpm: number
+  arborRadius: number
+  center: Point
+  orbitRadius?: number
+  targetPeriodFraction?: Fraction
+  assetId?: string
+}
+
+export interface ModeConfig {
+  mode: EditorMode
+  title: string
+  theme: 'clock' | 'orrery'
+  layerSectionTitle: string
+  allowAddLayer: boolean
+  motorLabel: string | null
+  statusLabels: {
+    working: string
+    wrong: string
+  }
+  layers: Layer[]
+  outputs: OutputTarget[]
+}
 
 export type ConstraintState =
   | 'free'
@@ -47,20 +110,22 @@ export interface PlacementResult {
   center: Point
   state: ConstraintState
   highlightedGearIds: string[]
-  highlightedAnchors: AnchorKind[]
+  highlightedAnchors: AnchorId[]
 }
 
-export interface HandState {
-  anchor: HandAnchor
+export interface OutputState {
+  id: Exclude<AnchorId, 'motor'>
+  label: string
   rpm: number | null
   driven: boolean
   conflicts: boolean
   correct: boolean
+  targetRpm: number
 }
 
-export interface ClockAnalysis {
+export interface TrainAnalysis {
   computedByGearId: Record<string, ComputedGearState>
-  handStates: Record<HandAnchor, HandState>
+  outputStates: Record<string, OutputState>
   status:
     | { kind: 'working'; label: string }
     | { kind: 'wrong'; label: string }
@@ -72,8 +137,7 @@ export interface NoticeState {
   variant: 'neutral' | 'success' | 'error'
 }
 
-export interface ClockworkProjectV1 {
-  version: 1
+export interface WorkspaceProjectSlice {
   layers: Array<{
     id: string
     name: string
@@ -89,4 +153,15 @@ export interface ClockworkProjectV1 {
     panX: number
     panY: number
   }
+}
+
+export interface ClockworkProjectV1 extends WorkspaceProjectSlice {
+  version: 1
+}
+
+export interface AtelierProjectV2 {
+  version: 2
+  activeMode: EditorMode
+  clock: WorkspaceProjectSlice
+  orrery: WorkspaceProjectSlice
 }

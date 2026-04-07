@@ -12,7 +12,7 @@ describe('hands', () => {
   })
 
   it('creates deterministic random hand angles when given a custom source', () => {
-    const values = [0.1, 0.5, 0.9]
+    const values = [0.1, 0.5, 0.9, 0.25, 0.75]
     let index = 0
     const angles = createRandomHandAngles(() => values[index++] ?? 0)
 
@@ -20,6 +20,8 @@ describe('hands', () => {
       secondArbor: 36,
       minuteArbor: 180,
       hourArbor: 324,
+      amPmArbor: 90,
+      dayArbor: 270,
     })
   })
 
@@ -29,6 +31,8 @@ describe('hands', () => {
     expect(angles.secondArbor).toBeCloseTo(180, 6)
     expect(angles.minuteArbor).toBeCloseTo(93, 6)
     expect(angles.hourArbor).toBeCloseTo(97.75, 6)
+    expect(angles.amPmArbor).toBeCloseTo(97.75, 6)
+    expect(angles.dayArbor).toBeCloseTo(6.9821, 4)
   })
 
   it('adds simulated rotation on top of the base hand angle while playing', () => {

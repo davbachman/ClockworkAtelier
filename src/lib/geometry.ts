@@ -1,7 +1,4 @@
 import {
-  ARBOR_BY_LAYER_ORDER,
-  ARBOR_RADII,
-  CLOCK_CENTER,
   COAXIAL_SNAP_TOLERANCE,
   EXACT_POSITION_EPSILON,
   MAX_TEETH,
@@ -10,9 +7,13 @@ import {
   MOTOR_CENTER,
   TOOTH_DEPTH,
   TOOTH_PITCH,
+  getModeConfig,
+  getOutputById,
+  getOutputForLayer,
 } from './constants'
 import type {
-  AnchorKind,
+  AnchorId,
+  EditorMode,
   Gear,
   Layer,
   PlacementResult,
@@ -59,8 +60,12 @@ export function getLayerById(layers: Layer[], layerId: string) {
   return layers.find((layer) => layer.id === layerId) ?? null
 }
 
-export function getArborForLayer(layerOrder: number) {
-  return ARBOR_BY_LAYER_ORDER[layerOrder] ?? null
+function isPointOnOutputCenter(
+  mode: EditorMode,
+  point: Point,
+  outputs = getModeConfig(mode).outputs,
+) {
+  return outputs.some((output) => isPointCoaxial(point, output.center))
 }
 
 export function getLayerVisualState(layerOrder: number, activeLayerOrder: number | null) {
@@ -188,6 +193,7 @@ function createMeshSnapCenter(target: Point, current: Point, distance: number): 
 }
 
 interface ResolvePlacementInput {
+  mode: EditorMode
   draftGear: Pick<Gear, 'teeth' | 'layerId' | 'center'>
   gears: Gear[]
   layers: Layer[]
@@ -199,7 +205,7 @@ interface TrainEdge {
   ratio: number
 }
 
-function buildTrainAdjacency(gears: Gear[]) {
+function buildTrainAdjacency(mode: EditorMode, gears: Gear[], outputs = getModeConfig(mode).outputs) {
   const adjacency = new Map<string, TrainEdge[]>()
 
   for (const gear of gears) {
@@ -224,7 +230,10 @@ function buildTrainAdjacency(gears: Gear[]) {
         continue
       }
 
-      if (!isPointCoaxial(gearA.center, gearB.center) || isPointCoaxial(gearA.center, CLOCK_CENTER)) {
+      if (
+        !isPointCoaxial(gearA.center, gearB.center) ||
+        isPointOnOutputCenter(mode, gearA.center, outputs)
+      ) {
         continue
       }
 
@@ -274,8 +283,8 @@ function collectCycleGearIds(
   return Array.from(cycleGearIds)
 }
 
-function findLoopConflictGearIds(gears: Gear[], draftGearId: string) {
-  const adjacency = buildTrainAdjacency(gears)
+function findLoopConflictGearIds(mode: EditorMode, gears: Gear[], draftGearId: string) {
+  const adjacency = buildTrainAdjacency(mode, gears)
   if (!adjacency.has(draftGearId)) {
     return []
   }
@@ -327,17 +336,20 @@ function findLoopConflictGearIds(gears: Gear[], draftGearId: string) {
 }
 
 function collectLoopPlacementConflicts({
+  mode,
   center,
   comparableGears,
   draftGear,
   draftGearId,
 }: {
+  mode: EditorMode
   center: Point
   comparableGears: Gear[]
   draftGear: Pick<Gear, 'teeth' | 'layerId'>
   draftGearId: string
 }) {
   return findLoopConflictGearIds(
+    mode,
     [
       ...comparableGears,
       {
@@ -352,22 +364,24 @@ function collectLoopPlacementConflicts({
 }
 
 function collectPlacementConflicts({
+  mode,
   center,
   sameLayerGears,
   otherLayerGears,
   draftRadius,
   draftOuterRadius,
-  allowedArbor,
+  allowedAnchor,
 }: {
+  mode: EditorMode
   center: Point
   sameLayerGears: Gear[]
   otherLayerGears: Gear[]
   draftRadius: number
   draftOuterRadius: number
-  allowedArbor: Exclude<AnchorKind, 'motor'> | null
+  allowedAnchor: Exclude<AnchorId, 'motor'> | null
 }) {
   const invalidGearIds = new Set<string>()
-  const invalidAnchors = new Set<AnchorKind>()
+  const invalidAnchors = new Set<AnchorId>()
 
   for (const gear of sameLayerGears) {
     const targetDistance = draftRadius + getPitchRadius(gear.teeth)
@@ -398,21 +412,23 @@ function collectPlacementConflicts({
     invalidAnchors.add('motor')
   }
 
-  const distanceToCenter = distanceBetween(center, CLOCK_CENTER)
-  if (allowedArbor) {
-    const allowedArborRadius = ARBOR_RADII[allowedArbor]
+  if (allowedAnchor) {
+    const allowedOutput = getOutputById(mode, allowedAnchor)
+    const allowedArborRadius = allowedOutput?.arborRadius ?? 0
+    const distanceToAllowedOutput = allowedOutput ? distanceBetween(center, allowedOutput.center) : Infinity
+
     if (
-      !isPointCoaxial(center, CLOCK_CENTER) &&
-      distanceToCenter < draftOuterRadius + allowedArborRadius - EXACT_POSITION_EPSILON
+      allowedOutput &&
+      !isPointCoaxial(center, allowedOutput.center) &&
+      distanceToAllowedOutput < draftOuterRadius + allowedArborRadius - EXACT_POSITION_EPSILON
     ) {
-      invalidAnchors.add(allowedArbor)
+      invalidAnchors.add(allowedAnchor)
     }
   } else {
-    for (const [anchor, arborRadius] of Object.entries(ARBOR_RADII) as Array<
-      [Exclude<AnchorKind, 'motor'>, number]
-    >) {
-      if (distanceToCenter < draftOuterRadius + arborRadius - EXACT_POSITION_EPSILON) {
-        invalidAnchors.add(anchor)
+    for (const output of getModeConfig(mode).outputs) {
+      const distanceToOutput = distanceBetween(center, output.center)
+      if (distanceToOutput < draftOuterRadius + output.arborRadius - EXACT_POSITION_EPSILON) {
+        invalidAnchors.add(output.id)
       }
     }
   }
@@ -424,24 +440,26 @@ function collectPlacementConflicts({
 }
 
 function enrichSatisfiedConstraints({
+  mode,
   center,
   sameLayerGears,
   otherLayerGears,
   draftRadius,
-  allowedArbor,
+  allowedAnchor,
   highlightedGearIds,
   highlightedAnchors,
 }: {
+  mode: EditorMode
   center: Point
   sameLayerGears: Gear[]
   otherLayerGears: Gear[]
   draftRadius: number
-  allowedArbor: Exclude<AnchorKind, 'motor'> | null
+  allowedAnchor: Exclude<AnchorId, 'motor'> | null
   highlightedGearIds: string[]
-  highlightedAnchors: AnchorKind[]
+  highlightedAnchors: AnchorId[]
 }) {
   const nextGearIds = new Set(highlightedGearIds)
-  const nextAnchors = new Set<AnchorKind>(highlightedAnchors)
+  const nextAnchors = new Set<AnchorId>(highlightedAnchors)
 
   for (const gear of sameLayerGears) {
     const targetDistance = draftRadius + getPitchRadius(gear.teeth)
@@ -460,8 +478,11 @@ function enrichSatisfiedConstraints({
     nextAnchors.add('motor')
   }
 
-  if (allowedArbor && isPointCoaxial(center, CLOCK_CENTER)) {
-    nextAnchors.add(allowedArbor)
+  if (allowedAnchor) {
+    const allowedOutput = getOutputById(mode, allowedAnchor)
+    if (allowedOutput && isPointCoaxial(center, allowedOutput.center)) {
+      nextAnchors.add(allowedAnchor)
+    }
   }
 
   return {
@@ -471,6 +492,7 @@ function enrichSatisfiedConstraints({
 }
 
 export function resolvePlacement({
+  mode,
   draftGear,
   gears,
   layers,
@@ -493,16 +515,17 @@ export function resolvePlacement({
   const otherLayerGears = comparableGears.filter((gear) => gear.layerId !== draftGear.layerId)
   const draftRadius = getPitchRadius(draftGear.teeth)
   const draftOuterRadius = getOuterRadius(draftGear.teeth)
-  const allowedArbor = getArborForLayer(layer.order)
+  const allowedOutput = getOutputForLayer(mode, layer.order) ?? null
+  const allowedAnchor = allowedOutput?.id ?? null
   const snapCandidates: Array<PlacementResult & { delta: number; priority: number }> = []
 
-  if (allowedArbor) {
-    const delta = distanceBetween(draftGear.center, CLOCK_CENTER)
+  if (allowedOutput) {
+    const delta = distanceBetween(draftGear.center, allowedOutput.center)
     if (delta <= COAXIAL_SNAP_TOLERANCE) {
       snapCandidates.push({
-        center: CLOCK_CENTER,
+        center: allowedOutput.center,
         state: 'coaxialSnap',
-        highlightedAnchors: [allowedArbor],
+        highlightedAnchors: [allowedOutput.id],
         highlightedGearIds: [],
         delta,
         priority: 0,
@@ -525,7 +548,7 @@ export function resolvePlacement({
   }
 
   for (const gear of otherLayerGears) {
-    if (isPointCoaxial(gear.center, CLOCK_CENTER)) {
+    if (isPointOnOutputCenter(mode, gear.center)) {
       continue
     }
 
@@ -607,25 +630,28 @@ export function resolvePlacement({
   )
   const scoredCandidates = snapCandidates.map((candidate) => {
     const conflicts = collectPlacementConflicts({
+      mode,
       center: candidate.center,
       sameLayerGears,
       otherLayerGears,
       draftRadius,
       draftOuterRadius,
-      allowedArbor,
+      allowedAnchor,
     })
     const enriched = enrichSatisfiedConstraints({
+      mode,
       center: candidate.center,
       sameLayerGears,
       otherLayerGears,
       draftRadius,
-      allowedArbor,
+      allowedAnchor,
       highlightedGearIds: candidate.highlightedGearIds,
       highlightedAnchors: candidate.highlightedAnchors,
     })
     const loopConflictGearIds =
       conflicts.invalidGearIds.length === 0 && conflicts.invalidAnchors.length === 0
         ? collectLoopPlacementConflicts({
+            mode,
             center: candidate.center,
             comparableGears,
             draftGear,
@@ -695,16 +721,18 @@ export function resolvePlacement({
   }
 
   const freeConflicts = collectPlacementConflicts({
+    mode,
     center: draftGear.center,
     sameLayerGears,
     otherLayerGears,
     draftRadius,
     draftOuterRadius,
-    allowedArbor,
+    allowedAnchor,
   })
   const freeLoopConflictGearIds =
     freeConflicts.invalidGearIds.length === 0 && freeConflicts.invalidAnchors.length === 0
       ? collectLoopPlacementConflicts({
+          mode,
           center: draftGear.center,
           comparableGears,
           draftGear,

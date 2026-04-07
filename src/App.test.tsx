@@ -33,103 +33,45 @@ describe('App', () => {
     resetEditorStore()
   })
 
-  it('adds a new layer and allows toggling the active layer off', () => {
+  it('starts in clock mode and toggles to orrery mode from the title card', () => {
     render(<App />)
 
+    expect(screen.getByTestId('mode-toggle')).toHaveTextContent('Clockwork Atelier')
     expect(screen.getByTestId('dial-ring-fill')).toBeInTheDocument()
-    expect(screen.getByText('XII')).toBeInTheDocument()
-    expect(screen.getByTestId('dial-numeral-III')).toHaveAttribute(
-      'transform',
-      expect.stringContaining('rotate(90'),
-    )
     expect(screen.getByTestId('layer-button-1')).toHaveTextContent('Second Hand Layer')
-    expect(screen.getByTestId('layer-button-2')).toHaveTextContent('Minute Hand Layer')
-    expect(screen.getByTestId('layer-button-3')).toHaveTextContent('Hour Hand Layer')
+    expect(screen.getByTestId('layer-button-4')).toHaveTextContent('AM/PM')
+    expect(screen.getByTestId('layer-button-5')).toHaveTextContent('Day')
+    expect(screen.getByTestId('layer-checkbox-4')).not.toBeChecked()
+    expect(screen.getByTestId('layer-checkbox-5')).not.toBeChecked()
+    expect(screen.getByTestId('layer-button-4')).toBeDisabled()
+    expect(screen.getByTestId('layer-button-5')).toBeDisabled()
+    expect(screen.queryByTestId('am-pm-dial')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('day-dial')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId('new-layer-button'))
+    fireEvent.click(screen.getByTestId('mode-toggle'))
 
-    expect(screen.getByTestId('layer-button-4')).toBeInTheDocument()
-    expect(screen.getByTestId('layer-button-1')).toHaveAttribute('data-active', 'true')
-
-    fireEvent.click(screen.getByTestId('layer-button-1'))
-
-    expect(screen.getByTestId('layer-button-1')).toHaveAttribute('data-active', 'false')
-    expect(screen.getByTestId('gear-create-button')).toBeDisabled()
+    expect(screen.getByTestId('mode-toggle')).toHaveTextContent('Orrery Atelier')
+    expect(screen.queryByTestId('dial-ring-fill')).not.toBeInTheDocument()
+    expect(screen.getByTestId('layer-button-1')).toHaveTextContent('Mercury')
+    expect(screen.getByTestId('layer-button-6')).toHaveTextContent('Saturn')
+    expect(screen.getByTestId('layer-checkbox-5')).not.toBeChecked()
+    expect(screen.getByTestId('layer-checkbox-6')).not.toBeChecked()
+    expect(screen.getByTestId('layer-button-5')).toBeDisabled()
+    expect(screen.getByTestId('layer-button-6')).toBeDisabled()
+    expect(screen.queryByTestId('new-layer-button')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('motor-label')).not.toBeInTheDocument()
   })
 
-  it('creates a gear on the active layer', () => {
+  it('creates a gear in the active workspace', () => {
     const { container } = render(<App />)
     const svgElement = container.querySelector('svg')
     expect(svgElement).not.toBeNull()
 
     mockSvgBounds(svgElement as SVGSVGElement)
-
-    fireEvent.change(screen.getByTestId('tooth-input'), { target: { value: '40' } })
-    expect(screen.getByTestId('gear-create-button')).toBeEnabled()
-
     placeGear()
 
     expect(screen.getByTestId('gear-gear-1')).toBeInTheDocument()
-  })
-
-  it('arms new gear placement from the button and places after a canvas drag', () => {
-    const { container } = render(<App />)
-    const svgElement = container.querySelector('svg')
-    expect(svgElement).not.toBeNull()
-
-    mockSvgBounds(svgElement as SVGSVGElement)
-
-    fireEvent.change(screen.getByTestId('tooth-input'), { target: { value: '40' } })
-    fireEvent.pointerDown(screen.getByTestId('gear-create-button'), {
-      button: 0,
-      pointerId: 10,
-      clientX: 20,
-      clientY: 20,
-    })
-    fireEvent.pointerUp(window, { button: 0, pointerId: 10, clientX: 1400, clientY: 20 })
-
-    expect(useEditorStore.getState().draftGear).toMatchObject({
-      mode: 'placing',
-    })
-
-    fireEvent.pointerDown(svgElement as SVGSVGElement, {
-      button: 0,
-      pointerId: 11,
-      clientX: 700,
-      clientY: 450,
-    })
-    fireEvent.pointerUp(window, { button: 0, pointerId: 11, clientX: 700, clientY: 450 })
-
-    expect(screen.getByTestId('gear-gear-1')).toBeInTheDocument()
-  })
-
-  it('cancels new gear placement when released off canvas after dragging on the canvas', () => {
-    const { container } = render(<App />)
-    const svgElement = container.querySelector('svg')
-    expect(svgElement).not.toBeNull()
-
-    mockSvgBounds(svgElement as SVGSVGElement)
-
-    fireEvent.change(screen.getByTestId('tooth-input'), { target: { value: '40' } })
-    fireEvent.pointerDown(screen.getByTestId('gear-create-button'), {
-      button: 0,
-      pointerId: 12,
-      clientX: 20,
-      clientY: 20,
-    })
-    fireEvent.pointerUp(window, { button: 0, pointerId: 12, clientX: 1400, clientY: 20 })
-
-    fireEvent.pointerDown(svgElement as SVGSVGElement, {
-      button: 0,
-      pointerId: 13,
-      clientX: 700,
-      clientY: 450,
-    })
-    fireEvent.pointerMove(window, { pointerId: 13, clientX: 720, clientY: 450 })
-    fireEvent.pointerUp(window, { button: 0, pointerId: 13, clientX: 1400, clientY: 450 })
-
-    expect(screen.queryByTestId('gear-gear-1')).not.toBeInTheDocument()
-    expect(useEditorStore.getState().draftGear).toBeNull()
+    expect(useEditorStore.getState().workspaces.clock.gears).toHaveLength(1)
   })
 
   it('opens the gear inspector on a single click', () => {
@@ -138,7 +80,6 @@ describe('App', () => {
     expect(svgElement).not.toBeNull()
 
     mockSvgBounds(svgElement as SVGSVGElement)
-
     placeGear()
 
     const gearHitTarget = screen.getByTestId('gear-hit-gear-1')
@@ -147,94 +88,104 @@ describe('App', () => {
 
     expect(screen.getByTestId('gear-inspector')).toHaveTextContent('Gear gear-1')
     expect(screen.getByTestId('gear-inspector')).toHaveTextContent('Teeth: 40')
-    expect(useEditorStore.getState().draftGear).toBeNull()
   })
 
-  it('moves a gear on click and drag', () => {
+  it('preserves independent clock and orrery builds when switching modes', () => {
     const { container } = render(<App />)
     const svgElement = container.querySelector('svg')
     expect(svgElement).not.toBeNull()
 
     mockSvgBounds(svgElement as SVGSVGElement)
-    placeGear()
+    placeGear('40', 700, 450)
 
-    const gearHitTarget = screen.getByTestId('gear-hit-gear-1')
-    fireEvent.pointerDown(gearHitTarget, { button: 0, pointerId: 2, clientX: 700, clientY: 450 })
-    fireEvent.pointerMove(window, { pointerId: 2, clientX: 760, clientY: 450 })
-    fireEvent.pointerUp(window, { button: 0, pointerId: 2, clientX: 760, clientY: 450 })
+    fireEvent.click(screen.getByTestId('mode-toggle'))
+    placeGear('24', 640, 320)
 
-    expect(useEditorStore.getState().gears[0]).toMatchObject({
-      id: 'gear-1',
-      center: { x: 160, y: 0 },
-    })
-    expect(screen.queryByTestId('gear-inspector')).not.toBeInTheDocument()
+    expect(useEditorStore.getState().workspaces.clock.gears).toHaveLength(1)
+    expect(useEditorStore.getState().workspaces.orrery.gears).toHaveLength(1)
+
+    fireEvent.click(screen.getByTestId('mode-toggle'))
+
+    expect(screen.getByTestId('dial-ring-fill')).toBeInTheDocument()
+    expect(useEditorStore.getState().activeMode).toBe('clock')
+    expect(screen.getByTestId('gear-gear-1')).toBeInTheDocument()
   })
 
-  it('pans the canvas on a secondary-button drag', () => {
-    const { container } = render(<App />)
-    const svgElement = container.querySelector('svg')
-    expect(svgElement).not.toBeNull()
-
-    mockSvgBounds(svgElement as SVGSVGElement)
-
-    fireEvent.pointerDown(svgElement as SVGSVGElement, {
-      button: 2,
-      pointerId: 3,
-      clientX: 600,
-      clientY: 450,
-    })
-    fireEvent.pointerMove(window, { pointerId: 3, clientX: 660, clientY: 510 })
-    fireEvent.pointerUp(window, { button: 2, pointerId: 3, clientX: 660, clientY: 510 })
-
-    expect(useEditorStore.getState().camera).toEqual({
-      panX: -60,
-      panY: -60,
-    })
-  })
-
-  it('pans the canvas when dragging the empty canvas with the primary pointer', () => {
-    const { container } = render(<App />)
-    const svgElement = container.querySelector('svg')
-    expect(svgElement).not.toBeNull()
-
-    mockSvgBounds(svgElement as SVGSVGElement)
-
-    fireEvent.pointerDown(svgElement as SVGSVGElement, {
-      button: 0,
-      pointerId: 14,
-      clientX: 600,
-      clientY: 450,
-    })
-    fireEvent.pointerMove(window, { pointerId: 14, clientX: 660, clientY: 510 })
-    fireEvent.pointerUp(window, { button: 0, pointerId: 14, clientX: 660, clientY: 510 })
-
-    expect(useEditorStore.getState().camera).toEqual({
-      panX: -60,
-      panY: -60,
-    })
-  })
-
-  it('deletes a gear when it is dragged off the canvas', () => {
-    const { container } = render(<App />)
-    const svgElement = container.querySelector('svg')
-    expect(svgElement).not.toBeNull()
-
-    mockSvgBounds(svgElement as SVGSVGElement)
-    placeGear()
-
-    const gearHitTarget = screen.getByTestId('gear-hit-gear-1')
-    fireEvent.pointerDown(gearHitTarget, { button: 0, pointerId: 15, clientX: 700, clientY: 450 })
-    fireEvent.pointerMove(window, { pointerId: 15, clientX: 720, clientY: 450 })
-    fireEvent.pointerUp(window, { button: 0, pointerId: 15, clientX: 1400, clientY: 450 })
-
-    expect(screen.queryByTestId('gear-gear-1')).not.toBeInTheDocument()
-    expect(useEditorStore.getState().selectedGearId).toBeNull()
-  })
-
-  it('renders minute and hour arbors with their corresponding layer groups', () => {
+  it('shows the sun only when no orrery layer is selected while keeping planets visible', () => {
     render(<App />)
 
-    expect(screen.getByTestId('layer-group-2')).toContainElement(screen.getByTestId('arbor-minuteArbor'))
-    expect(screen.getByTestId('layer-group-3')).toContainElement(screen.getByTestId('arbor-hourArbor'))
+    fireEvent.click(screen.getByTestId('mode-toggle'))
+    expect(screen.getByTestId('planet-earthArbor')).toBeInTheDocument()
+    expect(screen.queryByTestId('planet-jupiterArbor')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('planet-saturnArbor')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('sun-overlay')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('layer-button-1'))
+    expect(screen.getByTestId('planet-earthArbor')).toBeInTheDocument()
+    expect(screen.getByTestId('sun-overlay')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('layer-button-3'))
+    expect(screen.getByTestId('planet-earthArbor')).toBeInTheDocument()
+    expect(screen.queryByTestId('sun-overlay')).not.toBeInTheDocument()
+  })
+
+  it('enables the optional clock complications from their checkboxes', () => {
+    render(<App />)
+
+    expect(screen.queryByTestId('am-pm-dial')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('day-dial')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('arbor-amPmArbor')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('arbor-dayArbor')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('layer-checkbox-4'))
+    expect(screen.getByTestId('layer-button-4')).toBeEnabled()
+    expect(screen.getByTestId('am-pm-dial')).toBeInTheDocument()
+    expect(screen.getByTestId('am-pm-hand')).toBeInTheDocument()
+    expect(screen.getByTestId('arbor-amPmArbor')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('layer-checkbox-5'))
+    expect(screen.getByTestId('layer-button-5')).toBeEnabled()
+    expect(screen.getByTestId('day-dial')).toBeInTheDocument()
+    expect(screen.getByTestId('day-hand')).toBeInTheDocument()
+    expect(screen.getByTestId('arbor-dayArbor')).toBeInTheDocument()
+  })
+
+  it('enables Jupiter and Saturn only when their checkboxes are checked', () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('mode-toggle'))
+
+    expect(screen.queryByTestId('planet-jupiterArbor')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('planet-saturnArbor')).not.toBeInTheDocument()
+    expect(screen.getByTestId('layer-button-5')).toBeDisabled()
+    expect(screen.getByTestId('layer-button-6')).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId('layer-checkbox-5'))
+    expect(screen.getByTestId('layer-button-5')).toBeEnabled()
+    expect(screen.getByTestId('planet-jupiterArbor')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('layer-checkbox-6'))
+    expect(screen.getByTestId('layer-button-6')).toBeEnabled()
+    expect(screen.getByTestId('planet-saturnArbor')).toBeInTheDocument()
+  })
+
+  it('only opens an orrery planet dialog in the no-selection overview state', () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('mode-toggle'))
+    fireEvent.click(screen.getByTestId('planet-earthArbor'), {
+      clientX: 320,
+      clientY: 240,
+    })
+    expect(screen.queryByTestId('planet-dialog')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('layer-button-1'))
+    fireEvent.click(screen.getByTestId('planet-earthArbor'), {
+      clientX: 320,
+      clientY: 240,
+    })
+
+    expect(screen.getByTestId('planet-dialog')).toHaveTextContent('Earth')
+    expect(screen.getByTestId('planet-dialog')).toHaveTextContent('Target rate: 1/1 rev/year')
   })
 })

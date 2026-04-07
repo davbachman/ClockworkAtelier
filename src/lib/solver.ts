@@ -1,27 +1,21 @@
-import {
-  ARBOR_BY_LAYER_ORDER,
-  CLOCK_CENTER,
-  EXACT_POSITION_EPSILON,
-  HAND_TARGET_RPM,
-  MOTOR_CENTER,
-} from './constants'
+import { MOTOR_CENTER, getModeConfig } from './constants'
 import { distanceBetween, getLayerById, getPitchRadius, isPointCoaxial } from './geometry'
-import type { ClockAnalysis, Gear, HandState, Layer } from './types'
+import type { EditorMode, Gear, Layer, OutputState, TrainAnalysis } from './types'
 
 interface Edge {
   to: string
   ratio: number
 }
 
-const HAND_ORDER = ['secondArbor', 'minuteArbor', 'hourArbor'] as const
-
-function createEmptyHandState(anchor: (typeof HAND_ORDER)[number]): HandState {
+function createEmptyOutputState(output: ReturnType<typeof getModeConfig>['outputs'][number]): OutputState {
   return {
-    anchor,
+    id: output.id,
+    label: output.label,
     rpm: null,
     driven: false,
     conflicts: false,
     correct: false,
+    targetRpm: output.targetRpm,
   }
 }
 
@@ -29,26 +23,56 @@ function isMotorBound(gear: Gear) {
   return isPointCoaxial(gear.center, MOTOR_CENTER)
 }
 
-export function resolveClockStatus(handStates: ClockAnalysis['handStates']) {
-  const allCorrect = HAND_ORDER.every((anchor) => handStates[anchor].correct)
-  const anyDrivenWrong = HAND_ORDER.some((anchor) => {
-    const hand = handStates[anchor]
-    return hand.driven && (!hand.correct || hand.conflicts)
+function isPointOnOutputCenter(
+  point: Gear['center'],
+  outputs: ReturnType<typeof getModeConfig>['outputs'],
+) {
+  return outputs.some((output) => isPointCoaxial(point, output.center))
+}
+
+export function resolveModeStatus(
+  mode: EditorMode,
+  outputStates: TrainAnalysis['outputStates'],
+  outputs = getModeConfig(mode).outputs,
+) {
+  const anyDrivenWrong = outputs.some((output) => {
+    const current = outputStates[output.id]
+    return current?.driven && (!current.correct || current.conflicts)
   })
+  const allCorrect = outputs.every((output) => outputStates[output.id]?.correct)
+
+  if (mode === 'orrery') {
+    const earthState = outputStates.earthArbor
+
+    if (earthState?.correct && !anyDrivenWrong) {
+      return { kind: 'working' as const, label: getModeConfig(mode).statusLabels.working }
+    }
+
+    if (anyDrivenWrong) {
+      return { kind: 'wrong' as const, label: getModeConfig(mode).statusLabels.wrong }
+    }
+
+    return null
+  }
 
   if (allCorrect) {
-    return { kind: 'working' as const, label: 'WORKING CLOCK!' }
+    return { kind: 'working' as const, label: getModeConfig(mode).statusLabels.working }
   }
 
   if (anyDrivenWrong) {
-    return { kind: 'wrong' as const, label: 'WRONG HAND SPEED' }
+    return { kind: 'wrong' as const, label: getModeConfig(mode).statusLabels.wrong }
   }
 
   return null
 }
 
-export function analyzeClockwork(gears: Gear[], layers: Layer[]): ClockAnalysis {
-  const computedByGearId: ClockAnalysis['computedByGearId'] = {}
+export function analyzeClockwork(
+  mode: EditorMode,
+  gears: Gear[],
+  layers: Layer[],
+  outputs = getModeConfig(mode).outputs,
+): TrainAnalysis {
+  const computedByGearId: TrainAnalysis['computedByGearId'] = {}
   const adjacency = new Map<string, Edge[]>()
   const gearById = new Map<string, Gear>()
 
@@ -72,7 +96,7 @@ export function analyzeClockwork(gears: Gear[], layers: Layer[]): ClockAnalysis 
         const distance = distanceBetween(gearA.center, gearB.center)
         const meshDistance = getPitchRadius(gearA.teeth) + getPitchRadius(gearB.teeth)
 
-        if (Math.abs(distance - meshDistance) <= EXACT_POSITION_EPSILON) {
+        if (Math.abs(distance - meshDistance) <= 0.75) {
           adjacency.get(gearA.id)?.push({ to: gearB.id, ratio: -gearA.teeth / gearB.teeth })
           adjacency.get(gearB.id)?.push({ to: gearA.id, ratio: -gearB.teeth / gearA.teeth })
         }
@@ -84,7 +108,7 @@ export function analyzeClockwork(gears: Gear[], layers: Layer[]): ClockAnalysis 
         continue
       }
 
-      if (isPointCoaxial(gearA.center, CLOCK_CENTER)) {
+      if (isPointOnOutputCenter(gearA.center, outputs)) {
         continue
       }
 
@@ -172,44 +196,39 @@ export function analyzeClockwork(gears: Gear[], layers: Layer[]): ClockAnalysis 
     }
   }
 
-  const handStates = {
-    secondArbor: createEmptyHandState('secondArbor'),
-    minuteArbor: createEmptyHandState('minuteArbor'),
-    hourArbor: createEmptyHandState('hourArbor'),
-  }
+  const outputStates = Object.fromEntries(
+    outputs.map((output) => [output.id, createEmptyOutputState(output)]),
+  ) as TrainAnalysis['outputStates']
 
   for (const gear of gears) {
-    if (!isPointCoaxial(gear.center, CLOCK_CENTER)) {
-      continue
-    }
-
     const layer = getLayerById(layers, gear.layerId)
     if (!layer) {
       continue
     }
 
-    const anchor = ARBOR_BY_LAYER_ORDER[layer.order]
-    if (!anchor) {
+    const output = outputs.find((currentOutput) => currentOutput.layerOrder === layer.order)
+    if (!output || !isPointCoaxial(gear.center, output.center) || !(output.id in outputStates)) {
       continue
     }
 
     const computedState = computedByGearId[gear.id]
     const rpm = computedState?.rpm ?? null
-    const correct =
-      rpm !== null && Math.abs(rpm - HAND_TARGET_RPM[anchor]) <= HAND_TARGET_RPM[anchor] * 0.001
+    const correct = rpm !== null && Math.abs(rpm - output.targetRpm) <= output.targetRpm * 0.001
 
-    handStates[anchor] = {
-      anchor,
+    outputStates[output.id] = {
+      id: output.id,
+      label: output.label,
       rpm,
       driven: computedState?.drivenByMotor ?? false,
       conflicts: computedState?.conflicts ?? false,
       correct,
+      targetRpm: output.targetRpm,
     }
   }
 
   return {
     computedByGearId,
-    handStates,
-    status: resolveClockStatus(handStates),
+    outputStates,
+    status: resolveModeStatus(mode, outputStates, outputs),
   }
 }
