@@ -41,7 +41,7 @@ import {
   resolvePlacement,
   scalePoint,
 } from '../lib/geometry'
-import { formatRpmFraction } from '../lib/fractions'
+import { approximateFraction, formatRpmFraction } from '../lib/fractions'
 import { getAnimatedAngle } from '../lib/hands'
 import { SUN_ART_ASSET, SUN_OCCLUDER_ASSET } from '../lib/orreryAssets'
 import { PLANET_ASSETS } from '../lib/planetAssets'
@@ -117,6 +117,11 @@ function parseTeethInput(value: string) {
   }
 
   return parsedValue
+}
+
+function formatRateWithUnit(value: number, unit: string) {
+  const { numerator, denominator } = approximateFraction(value)
+  return `${numerator}/${denominator} ${unit}`
 }
 
 function getGearStyle(layer: Layer, activeLayerOrder: number | null) {
@@ -529,7 +534,6 @@ export function ClockworkEditor() {
     openPlanetDialog,
     closePlanetDialog,
     closeOverlays,
-    setNotice,
     importProject,
   } = useEditorStore()
 
@@ -545,7 +549,6 @@ export function ClockworkEditor() {
     playbackMs,
     baseAngles,
     camera,
-    notice,
     inspector,
     planetDialog,
   } = workspace
@@ -916,10 +919,7 @@ export function ClockworkEditor() {
         importProject(project)
       })
     } catch (error) {
-      setNotice({
-        message: error instanceof Error ? error.message : 'Unable to import project.',
-        variant: 'error',
-      })
+      console.error(error instanceof Error ? error.message : 'Unable to import project.')
     } finally {
       event.target.value = ''
     }
@@ -945,7 +945,6 @@ export function ClockworkEditor() {
     anchor.download = 'atelier-project.json'
     anchor.click()
     URL.revokeObjectURL(url)
-    setNotice({ message: 'Project exported.', variant: 'success' })
   }
 
   function handleCreateGearPointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -1352,6 +1351,46 @@ export function ClockworkEditor() {
 
   return (
     <div className="app-shell" data-mode={modeConfig.theme}>
+      <header className="editor-topbar">
+        <div className="topbar-scene">
+          <div className="topbar-scene-label">
+            <span>{modeConfig.title}</span>
+          </div>
+          <button
+            className="sidebar-button topbar-scene-button"
+            data-testid="mode-toggle"
+            onClick={() => switchMode()}
+            type="button"
+          >
+            Switch Scene
+          </button>
+        </div>
+
+        <button
+          className="play-button topbar-play-button"
+          data-active={isPlaying}
+          data-testid="play-button"
+          onClick={() => togglePlay(new Date())}
+          type="button"
+        >
+          <span>{isPlaying ? 'Pause' : 'Play'}</span>
+          <span aria-hidden="true">{isPlaying ? '❚❚' : '▶'}</span>
+        </button>
+
+        <div className="topbar-project-controls">
+          <button className="sidebar-button" onClick={handleExport} type="button">
+            Export JSON
+          </button>
+          <button
+            className="sidebar-button"
+            onClick={() => fileInputRef.current?.click()}
+            type="button"
+          >
+            Import JSON
+          </button>
+        </div>
+      </header>
+
       <section className="workspace-panel">
         <div className="workspace-frame">
           {analysis.status ? (
@@ -1376,7 +1415,10 @@ export function ClockworkEditor() {
                 {analysis.computedByGearId[inspectorGear.id]?.conflicts
                   ? 'Rate unavailable (conflicting train).'
                   : analysis.computedByGearId[inspectorGear.id]?.rpm !== null
-                    ? `Rate: ${formatRpmFraction(analysis.computedByGearId[inspectorGear.id].rpm ?? 0)}`
+                    ? `Rate: ${formatRateWithUnit(
+                        analysis.computedByGearId[inspectorGear.id].rpm ?? 0,
+                        activeMode === 'clock' ? 'rpm' : 'rev/year',
+                      )}`
                     : 'Rate: not driven by the motor.'}
               </p>
             </div>
@@ -1811,31 +1853,6 @@ export function ClockworkEditor() {
       </section>
 
       <aside className="sidebar">
-        <div className="panel title-panel">
-          <button
-            className="title-toggle"
-            data-testid="mode-toggle"
-            onClick={() => switchMode()}
-            type="button"
-          >
-            <span>{modeConfig.title}</span>
-            <small>Switch scene</small>
-          </button>
-        </div>
-
-        <div className="panel">
-          <button
-            className="play-button"
-            data-active={isPlaying}
-            data-testid="play-button"
-            onClick={() => togglePlay(new Date())}
-            type="button"
-          >
-            <span>{isPlaying ? 'Pause' : 'Play'}</span>
-            <span aria-hidden="true">{isPlaying ? '❚❚' : '▶'}</span>
-          </button>
-        </div>
-
         <div className="panel">
           <h2>New Gear</h2>
           <div className="gear-row">
@@ -1915,34 +1932,16 @@ export function ClockworkEditor() {
             ) : null}
           </div>
         </div>
-
-        <div className="panel">
-          <h2>Project</h2>
-          <div className="sidebar-actions">
-            <button className="sidebar-button" onClick={handleExport} type="button">
-              Export JSON
-            </button>
-            <button
-              className="sidebar-button"
-              onClick={() => fileInputRef.current?.click()}
-              type="button"
-            >
-              Import JSON
-            </button>
-          </div>
-          <input
-            ref={fileInputRef}
-            accept="application/json"
-            id={fileInputId}
-            onChange={handleImportFileChange}
-            style={{ display: 'none' }}
-            type="file"
-          />
-          <div className="notice" data-variant={notice?.variant ?? 'neutral'}>
-            {notice?.message ?? ''}
-          </div>
-        </div>
       </aside>
+
+      <input
+        ref={fileInputRef}
+        accept="application/json"
+        id={fileInputId}
+        onChange={handleImportFileChange}
+        style={{ display: 'none' }}
+        type="file"
+      />
     </div>
   )
 }
