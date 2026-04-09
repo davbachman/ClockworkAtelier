@@ -245,7 +245,7 @@ export const MODE_CONFIGS: Record<EditorMode, ModeConfig> = {
     title: 'Clockwork Atelier',
     theme: 'clock',
     layerSectionTitle: 'Layers',
-    allowAddLayer: true,
+    allowAddLayer: false,
     motorLabel: null,
     statusLabels: {
       working: 'WORKING CLOCK!',

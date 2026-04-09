@@ -1,4 +1,5 @@
 import { parseProjectJson } from '../lib/project'
+import { WORKSPACE_CENTER } from '../lib/constants'
 import { resetEditorStore, useEditorStore } from './editorStore'
 
 describe('editorStore', () => {
@@ -24,6 +25,15 @@ describe('editorStore', () => {
     expect(state.workspaces.clock.baseAngles.hourArbor).toBeCloseTo(97.75, 6)
     expect(state.workspaces.clock.baseAngles.amPmArbor).toBeCloseTo(97.75, 6)
     expect(state.workspaces.clock.baseAngles.dayArbor).toBeCloseTo(6.9821, 4)
+  })
+
+  it('starts with the clock camera centered on the main hand arbor', () => {
+    const state = useEditorStore.getState()
+
+    expect(state.workspaces.clock.camera).toEqual({
+      panX: WORKSPACE_CENTER.x,
+      panY: WORKSPACE_CENTER.y,
+    })
   })
 
   it('switches modes while preserving workspace builds and clearing transient UI state', () => {
@@ -117,5 +127,141 @@ describe('editorStore', () => {
     expect(state.workspaces.orrery.layers).toHaveLength(6)
     expect(state.workspaces.orrery.gears).toHaveLength(0)
     expect(state.workspaces.clock.notice?.message).toBe('Project imported.')
+  })
+
+  it('undoes deleting a selected gear', () => {
+    useEditorStore.setState((state) => ({
+      ...state,
+      workspaces: {
+        ...state.workspaces,
+        clock: {
+          ...state.workspaces.clock,
+          gears: [
+            {
+              id: 'gear-1',
+              teeth: 36,
+              layerId: 'layer-1',
+              center: { x: -140, y: 0 },
+            },
+          ],
+          selectedGearId: 'gear-1',
+        },
+      },
+    }))
+
+    useEditorStore.getState().deleteSelection()
+    expect(useEditorStore.getState().workspaces.clock.gears).toHaveLength(0)
+
+    useEditorStore.getState().undo()
+
+    const state = useEditorStore.getState()
+    expect(state.workspaces.clock.gears).toEqual([
+      {
+        id: 'gear-1',
+        teeth: 36,
+        layerId: 'layer-1',
+        center: { x: -140, y: 0 },
+      },
+    ])
+    expect(state.workspaces.clock.selectedGearId).toBeNull()
+  })
+
+  it('undoes importing a project', () => {
+    useEditorStore.setState((state) => ({
+      ...state,
+      workspaces: {
+        ...state.workspaces,
+        clock: {
+          ...state.workspaces.clock,
+          gears: [
+            {
+              id: 'gear-1',
+              teeth: 24,
+              layerId: 'layer-2',
+              center: { x: 10, y: 20 },
+            },
+          ],
+        },
+      },
+    }))
+
+    const project = parseProjectJson(
+      JSON.stringify({
+        version: 2,
+        activeMode: 'orrery',
+        clock: {
+          layers: [
+            { id: 'layer-1', name: 'Second Hand Layer', order: 1 },
+            { id: 'layer-2', name: 'Minute Hand Layer', order: 2 },
+            { id: 'layer-3', name: 'Hour Hand Layer', order: 3 },
+          ],
+          gears: [],
+          camera: { panX: 0, panY: 0 },
+        },
+        orrery: {
+          layers: [
+            { id: 'layer-1', name: 'Mercury Layer', order: 1 },
+            { id: 'layer-2', name: 'Venus Layer', order: 2 },
+            { id: 'layer-3', name: 'Earth Layer', order: 3 },
+            { id: 'layer-4', name: 'Mars Layer', order: 4 },
+            { id: 'layer-5', name: 'Jupiter Layer', order: 5 },
+            { id: 'layer-6', name: 'Saturn Layer', order: 6 },
+          ],
+          gears: [
+            {
+              id: 'gear-9',
+              teeth: 52,
+              layerId: 'layer-4',
+              center: { x: 60, y: -40 },
+            },
+          ],
+          camera: { panX: 18, panY: -12 },
+        },
+      }),
+    )
+
+    useEditorStore.getState().importProject(project)
+    expect(useEditorStore.getState().activeMode).toBe('orrery')
+
+    useEditorStore.getState().undo()
+
+    const state = useEditorStore.getState()
+    expect(state.activeMode).toBe('clock')
+    expect(state.workspaces.clock.gears).toEqual([
+      {
+        id: 'gear-1',
+        teeth: 24,
+        layerId: 'layer-2',
+        center: { x: 10, y: 20 },
+      },
+    ])
+    expect(state.workspaces.orrery.gears).toHaveLength(0)
+  })
+
+  it('loads the selected gear tooth count into the input', () => {
+    useEditorStore.setState((state) => ({
+      ...state,
+      workspaces: {
+        ...state.workspaces,
+        clock: {
+          ...state.workspaces.clock,
+          gears: [
+            {
+              id: 'gear-1',
+              teeth: 40,
+              layerId: 'layer-2',
+              center: { x: 12, y: 24 },
+            },
+          ],
+          selectedGearId: 'gear-1',
+        },
+      },
+    }))
+
+    useEditorStore.getState().selectGear('gear-1')
+
+    const state = useEditorStore.getState()
+    expect(state.workspaces.clock.selectedGearId).toBe('gear-1')
+    expect(state.workspaces.clock.toothInput).toBe('40')
   })
 })

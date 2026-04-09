@@ -90,6 +90,8 @@ const DEFAULT_OPTIONAL_LAYER_VISIBILITY = {
   },
 } as const
 
+type TopbarMenu = 'mode' | 'extra' | 'file'
+
 function isOptionalLayer(mode: EditorMode, layerId: string) {
   return OPTIONAL_LAYER_IDS_BY_MODE[mode].includes(layerId as never)
 }
@@ -534,6 +536,7 @@ export function ClockworkEditor() {
     openPlanetDialog,
     closePlanetDialog,
     closeOverlays,
+    undo,
     importProject,
   } = useEditorStore()
 
@@ -555,14 +558,17 @@ export function ClockworkEditor() {
   const modeConfig = getModeConfig(activeMode)
 
   const [isPanning, setIsPanning] = useState(false)
+  const [openMenu, setOpenMenu] = useState<TopbarMenu | null>(null)
   const [optionalLayerVisibilityByMode, setOptionalLayerVisibilityByMode] = useState(
     DEFAULT_OPTIONAL_LAYER_VISIBILITY,
   )
   const svgRef = useRef<SVGSVGElement | null>(null)
+  const topbarRef = useRef<HTMLElement | null>(null)
   const dialMaskId = useId().replace(/:/g, '-')
   const orreryArmMaskId = useId().replace(/:/g, '-')
   const fileInputId = useId()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const toothInputRef = useRef<HTMLInputElement | null>(null)
   const lastPointerWorldRef = useRef<Point>(getDefaultPlacementPoint())
   const panInteractionRef = useRef<{
     pointerId: number
@@ -607,6 +613,12 @@ export function ClockworkEditor() {
     activeMode === 'orrery'
       ? gears.filter((gear) => visibleLayerIdSet.has(gear.layerId))
       : gears
+  const extraLayers = sortedLayers.filter((layer) => isOptionalLayer(activeMode, layer.id))
+  const sidebarLayers = sortedLayers.filter(
+    (layer) =>
+      !isOptionalLayer(activeMode, layer.id) ||
+      getOptionalLayerVisibility(optionalLayerVisibilityByMode, activeMode, layer.id),
+  )
   const activeLayerOrder =
     activeLayerId && visibleLayerIdSet.has(activeLayerId)
       ? getLayerById(visibleLayers, activeLayerId)?.order ?? null
@@ -632,6 +644,33 @@ export function ClockworkEditor() {
       closePlanetDialog()
     }
   }, [activeMode, closePlanetDialog, planetDialog, visibleOutputIds])
+
+  useEffect(() => {
+    if (!openMenu) {
+      return
+    }
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null
+
+      if (target && topbarRef.current?.contains(target)) {
+        return
+      }
+
+      setOpenMenu(null)
+    }
+
+    window.addEventListener('pointerdown', onPointerDown)
+    return () => window.removeEventListener('pointerdown', onPointerDown)
+  }, [openMenu])
+
+  useEffect(() => {
+    if (!selectedGearId || document.activeElement !== toothInputRef.current) {
+      return
+    }
+
+    toothInputRef.current?.blur()
+  }, [selectedGearId])
 
   const placementResult =
     draftGear === null || !visibleLayerIdSet.has(draftGear.layerId)
@@ -674,7 +713,28 @@ export function ClockworkEditor() {
   })
 
   const handleKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    const target = event.target as HTMLElement | null
+    const isEditableTarget =
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target?.isContentEditable === true
+
+    if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === 'z') {
+      if (isEditableTarget) {
+        return
+      }
+
+      event.preventDefault()
+      undo()
+      return
+    }
+
     if (event.key === 'Escape') {
+      if (openMenu) {
+        setOpenMenu(null)
+        return
+      }
+
       if (draftGearRef.current?.mode === 'moving') {
         cancelDraft()
       } else if (planetDialog) {
@@ -685,6 +745,10 @@ export function ClockworkEditor() {
     }
 
     if (event.key === 'Delete' || event.key === 'Backspace') {
+      if (isEditableTarget) {
+        return
+      }
+
       if (!draftGearRef.current) {
         deleteSelection()
       }
@@ -925,7 +989,7 @@ export function ClockworkEditor() {
     }
   }
 
-  function handleExport() {
+  async function handleSave() {
     const project = buildProjectSnapshot(activeMode, {
       clock: {
         layers: workspaces.clock.layers,
@@ -938,13 +1002,71 @@ export function ClockworkEditor() {
         camera: workspaces.orrery.camera,
       },
     })
-    const blob = new Blob([serializeProject(project)], { type: 'application/json' })
+    const serializedProject = serializeProject(project)
+    const windowWithPicker = window as Window & {
+      showSaveFilePicker?: (options?: {
+        suggestedName?: string
+        types?: Array<{ description: string; accept: Record<string, string[]> }>
+      }) => Promise<{
+        createWritable: () => Promise<{
+          write: (data: string) => Promise<void>
+          close: () => Promise<void>
+        }>
+      }>
+    }
+
+    try {
+      if (windowWithPicker.showSaveFilePicker) {
+        const fileHandle = await windowWithPicker.showSaveFilePicker({
+          suggestedName: 'atelier-project.json',
+          types: [
+            {
+              description: 'Clockwork Atelier Project',
+              accept: {
+                'application/json': ['.json'],
+              },
+            },
+          ],
+        })
+        const writable = await fileHandle.createWritable()
+        await writable.write(serializedProject)
+        await writable.close()
+        return
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return
+      }
+
+      console.error(error instanceof Error ? error.message : 'Unable to save project.')
+      return
+    }
+
+    const blob = new Blob([serializedProject], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
     anchor.download = 'atelier-project.json'
     anchor.click()
     URL.revokeObjectURL(url)
+  }
+
+  function handleModeSelect(nextMode: EditorMode) {
+    setOpenMenu(null)
+
+    if (activeMode !== nextMode) {
+      switchMode()
+    }
+  }
+
+  function handleImportSelect() {
+    setOpenMenu(null)
+    fileInputRef.current?.click()
+  }
+
+  async function handleSaveSelect() {
+    setOpenMenu(null)
+    await handleSave()
   }
 
   function handleCreateGearPointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -970,6 +1092,10 @@ export function ClockworkEditor() {
       startedFromButton: true,
       touchedCanvas: false,
     }
+  }
+
+  function toggleTopbarMenu(menu: TopbarMenu) {
+    setOpenMenu((current) => (current === menu ? null : menu))
   }
 
   function handleStagePointerMove(event: ReactPointerEvent<SVGSVGElement>) {
@@ -1351,43 +1477,138 @@ export function ClockworkEditor() {
 
   return (
     <div className="app-shell" data-mode={modeConfig.theme}>
-      <header className="editor-topbar">
-        <div className="topbar-scene">
-          <div className="topbar-scene-label">
-            <span>{modeConfig.title}</span>
-          </div>
-          <button
-            className="sidebar-button topbar-scene-button"
-            data-testid="mode-toggle"
-            onClick={() => switchMode()}
-            type="button"
-          >
-            Switch Scene
-          </button>
+      <header ref={topbarRef} className="editor-topbar">
+        <div className="toolbar-title" data-testid="mode-title">
+          {modeConfig.title}
         </div>
 
-        <button
-          className="play-button topbar-play-button"
-          data-active={isPlaying}
-          data-testid="play-button"
-          onClick={() => togglePlay(new Date())}
-          type="button"
-        >
-          <span>{isPlaying ? 'Pause' : 'Play'}</span>
-          <span aria-hidden="true">{isPlaying ? '❚❚' : '▶'}</span>
-        </button>
+        <div className="menu-bar">
+          <div className="menu">
+            <button
+              aria-expanded={openMenu === 'mode'}
+              className="menu-trigger"
+              data-open={openMenu === 'mode'}
+              data-testid="menu-trigger-mode"
+              onClick={() => toggleTopbarMenu('mode')}
+              type="button"
+            >
+              Mode
+            </button>
+            {openMenu === 'mode' ? (
+              <div className="menu-panel" role="menu">
+                <button
+                  aria-checked={activeMode === 'clock'}
+                  className="menu-item"
+                  data-checked={activeMode === 'clock'}
+                  data-testid="menu-item-mode-clock"
+                  onClick={() => handleModeSelect('clock')}
+                  role="menuitemradio"
+                  type="button"
+                >
+                  <span className="menu-item-check" aria-hidden="true">
+                    {activeMode === 'clock' ? '✓' : ''}
+                  </span>
+                  <span>Clockwork</span>
+                </button>
+                <button
+                  aria-checked={activeMode === 'orrery'}
+                  className="menu-item"
+                  data-checked={activeMode === 'orrery'}
+                  data-testid="menu-item-mode-orrery"
+                  onClick={() => handleModeSelect('orrery')}
+                  role="menuitemradio"
+                  type="button"
+                >
+                  <span className="menu-item-check" aria-hidden="true">
+                    {activeMode === 'orrery' ? '✓' : ''}
+                  </span>
+                  <span>Orrery</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
 
-        <div className="topbar-project-controls">
-          <button className="sidebar-button" onClick={handleExport} type="button">
-            Export JSON
-          </button>
-          <button
-            className="sidebar-button"
-            onClick={() => fileInputRef.current?.click()}
-            type="button"
-          >
-            Import JSON
-          </button>
+          <div className="menu">
+            <button
+              aria-expanded={openMenu === 'extra'}
+              className="menu-trigger"
+              data-open={openMenu === 'extra'}
+              data-testid="menu-trigger-extra"
+              onClick={() => toggleTopbarMenu('extra')}
+              type="button"
+            >
+              Extra
+            </button>
+            {openMenu === 'extra' ? (
+              <div className="menu-panel" role="menu">
+                {extraLayers.map((layer) => {
+                  const enabled = getOptionalLayerVisibility(
+                    optionalLayerVisibilityByMode,
+                    activeMode,
+                    layer.id,
+                  )
+
+                  return (
+                    <button
+                      key={layer.id}
+                      aria-checked={enabled}
+                      className="menu-item"
+                      data-checked={enabled}
+                      data-testid={`menu-item-extra-${layer.order}`}
+                      onClick={() => {
+                        handleOptionalLayerToggle(layer, !enabled)
+                        setOpenMenu(null)
+                      }}
+                      role="menuitemcheckbox"
+                      type="button"
+                    >
+                      <span className="menu-item-check" aria-hidden="true">
+                        {enabled ? '✓' : ''}
+                      </span>
+                      <span>{layer.name}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="menu">
+            <button
+              aria-expanded={openMenu === 'file'}
+              className="menu-trigger"
+              data-open={openMenu === 'file'}
+              data-testid="menu-trigger-file"
+              onClick={() => toggleTopbarMenu('file')}
+              type="button"
+            >
+              File
+            </button>
+            {openMenu === 'file' ? (
+              <div className="menu-panel" role="menu">
+                <button
+                  className="menu-item"
+                  data-testid="menu-item-file-save"
+                  onClick={() => void handleSaveSelect()}
+                  role="menuitem"
+                  type="button"
+                >
+                  <span className="menu-item-check" aria-hidden="true" />
+                  <span>Save</span>
+                </button>
+                <button
+                  className="menu-item"
+                  data-testid="menu-item-file-import"
+                  onClick={handleImportSelect}
+                  role="menuitem"
+                  type="button"
+                >
+                  <span className="menu-item-check" aria-hidden="true" />
+                  <span>Import</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -1853,6 +2074,17 @@ export function ClockworkEditor() {
       </section>
 
       <aside className="sidebar">
+        <button
+          className="play-button"
+          data-active={isPlaying}
+          data-testid="play-button"
+          onClick={() => togglePlay(new Date())}
+          type="button"
+        >
+          <span>{isPlaying ? 'Pause' : 'Play'}</span>
+          <span aria-hidden="true">{isPlaying ? '❚❚' : '▶'}</span>
+        </button>
+
         <div className="panel">
           <h2>New Gear</h2>
           <div className="gear-row">
@@ -1869,12 +2101,14 @@ export function ClockworkEditor() {
             <label>
               <span className="sr-only">Gear teeth</span>
               <input
+                ref={toothInputRef}
                 className="gear-input"
                 data-testid="tooth-input"
                 inputMode="numeric"
                 max={MAX_TEETH}
                 min={MIN_TEETH}
                 onChange={(event) => setToothInput(event.target.value)}
+                onFocus={() => selectGear(null)}
                 placeholder={`Teeth (${MIN_TEETH}-${MAX_TEETH})`}
                 type="text"
                 value={toothInput}
@@ -1886,10 +2120,7 @@ export function ClockworkEditor() {
         <div className="panel">
           <h2>{modeConfig.layerSectionTitle}</h2>
           <div className="layer-list">
-            {sortedLayers.map((layer) => {
-              const layerEnabled =
-                getOptionalLayerVisibility(optionalLayerVisibilityByMode, activeMode, layer.id)
-
+            {sidebarLayers.map((layer) => {
               return (
                 <div
                   key={layer.id}
@@ -1898,25 +2129,13 @@ export function ClockworkEditor() {
                 >
                   <button
                     className="layer-button"
-                    data-active={activeLayerId === layer.id && layerEnabled}
-                    data-disabled={!layerEnabled}
+                    data-active={activeLayerId === layer.id}
                     data-testid={`layer-button-${layer.order}`}
-                    disabled={!layerEnabled}
                     onClick={() => toggleLayer(layer.id)}
                     type="button"
                   >
                     {layer.name}
                   </button>
-                  {isOptionalLayer(activeMode, layer.id) ? (
-                    <input
-                      aria-label={`Enable ${layer.name}`}
-                      checked={layerEnabled}
-                      className="layer-checkbox"
-                      data-testid={`layer-checkbox-${layer.order}`}
-                      onChange={(event) => handleOptionalLayerToggle(layer, event.target.checked)}
-                      type="checkbox"
-                    />
-                  ) : null}
                 </div>
               )
             })}
