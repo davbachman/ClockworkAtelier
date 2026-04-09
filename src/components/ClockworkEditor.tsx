@@ -92,6 +92,8 @@ const DEFAULT_OPTIONAL_LAYER_VISIBILITY = {
 
 type TopbarMenu = 'mode' | 'extra' | 'file'
 
+const REPOSITORY_URL = 'https://github.com/davbachman/ClockworkAtelier'
+
 function isOptionalLayer(mode: EditorMode, layerId: string) {
   return OPTIONAL_LAYER_IDS_BY_MODE[mode].includes(layerId as never)
 }
@@ -1069,6 +1071,11 @@ export function ClockworkEditor() {
     await handleSave()
   }
 
+  function handleAboutSelect() {
+    setOpenMenu(null)
+    window.open(REPOSITORY_URL, '_blank', 'noopener,noreferrer')
+  }
+
   function handleCreateGearPointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
     if (event.button !== 0 || !canCreateGear) {
       return
@@ -1485,6 +1492,53 @@ export function ClockworkEditor() {
         <div className="menu-bar">
           <div className="menu">
             <button
+              aria-expanded={openMenu === 'file'}
+              className="menu-trigger"
+              data-open={openMenu === 'file'}
+              data-testid="menu-trigger-file"
+              onClick={() => toggleTopbarMenu('file')}
+              type="button"
+            >
+              File
+            </button>
+            {openMenu === 'file' ? (
+              <div className="menu-panel" role="menu">
+                <button
+                  className="menu-item"
+                  data-testid="menu-item-file-about"
+                  onClick={handleAboutSelect}
+                  role="menuitem"
+                  type="button"
+                >
+                  <span className="menu-item-check" aria-hidden="true" />
+                  <span>About</span>
+                </button>
+                <button
+                  className="menu-item"
+                  data-testid="menu-item-file-save"
+                  onClick={() => void handleSaveSelect()}
+                  role="menuitem"
+                  type="button"
+                >
+                  <span className="menu-item-check" aria-hidden="true" />
+                  <span>Save</span>
+                </button>
+                <button
+                  className="menu-item"
+                  data-testid="menu-item-file-import"
+                  onClick={handleImportSelect}
+                  role="menuitem"
+                  type="button"
+                >
+                  <span className="menu-item-check" aria-hidden="true" />
+                  <span>Import</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="menu">
+            <button
               aria-expanded={openMenu === 'mode'}
               className="menu-trigger"
               data-open={openMenu === 'mode'}
@@ -1569,43 +1623,6 @@ export function ClockworkEditor() {
                     </button>
                   )
                 })}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="menu">
-            <button
-              aria-expanded={openMenu === 'file'}
-              className="menu-trigger"
-              data-open={openMenu === 'file'}
-              data-testid="menu-trigger-file"
-              onClick={() => toggleTopbarMenu('file')}
-              type="button"
-            >
-              File
-            </button>
-            {openMenu === 'file' ? (
-              <div className="menu-panel" role="menu">
-                <button
-                  className="menu-item"
-                  data-testid="menu-item-file-save"
-                  onClick={() => void handleSaveSelect()}
-                  role="menuitem"
-                  type="button"
-                >
-                  <span className="menu-item-check" aria-hidden="true" />
-                  <span>Save</span>
-                </button>
-                <button
-                  className="menu-item"
-                  data-testid="menu-item-file-import"
-                  onClick={handleImportSelect}
-                  role="menuitem"
-                  type="button"
-                >
-                  <span className="menu-item-check" aria-hidden="true" />
-                  <span>Import</span>
-                </button>
               </div>
             ) : null}
           </div>

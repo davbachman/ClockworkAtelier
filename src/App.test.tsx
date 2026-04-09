@@ -43,6 +43,21 @@ describe('App', () => {
     resetEditorStore()
   })
 
+  it('opens the repository from the file menu about item', () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+
+    render(<App />)
+
+    fireEvent.click(screen.getByTestId('menu-trigger-file'))
+    fireEvent.click(screen.getByTestId('menu-item-file-about'))
+
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://github.com/davbachman/ClockworkAtelier',
+      '_blank',
+      'noopener,noreferrer',
+    )
+  })
+
   it('starts in clock mode and toggles to orrery mode from the mode menu', () => {
     render(<App />)
 
