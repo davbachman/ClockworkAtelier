@@ -416,9 +416,13 @@ function collectPlacementConflicts({
     const allowedOutput = getOutputById(mode, allowedAnchor)
     const allowedArborRadius = allowedOutput?.arborRadius ?? 0
     const distanceToAllowedOutput = allowedOutput ? distanceBetween(center, allowedOutput.center) : Infinity
+    const isAllowedOutputOccupied =
+      allowedOutput !== null &&
+      sameLayerGears.some((gear) => isPointCoaxial(gear.center, allowedOutput.center))
 
     if (
       allowedOutput &&
+      !isAllowedOutputOccupied &&
       !isPointCoaxial(center, allowedOutput.center) &&
       distanceToAllowedOutput < draftOuterRadius + allowedArborRadius - EXACT_POSITION_EPSILON
     ) {

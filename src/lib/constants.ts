@@ -58,7 +58,7 @@ export const HAND_TARGET_RPM = {
   secondArbor: 1,
   minuteArbor: 1 / 60,
   hourArbor: 1 / 720,
-  amPmArbor: 1 / 720,
+  amPmArbor: 1 / 1440,
   dayArbor: 1 / (7 * 24 * 60),
 } as const
 

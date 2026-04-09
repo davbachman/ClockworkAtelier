@@ -147,7 +147,7 @@ describe('solver', () => {
   it('uses the configured clock target speeds for the optional complications', () => {
     const outputs = getModeConfig('clock').outputs
 
-    expect(outputs.find((output) => output.id === 'amPmArbor')?.targetRpm).toBeCloseTo(1 / 720, 8)
+    expect(outputs.find((output) => output.id === 'amPmArbor')?.targetRpm).toBeCloseTo(1 / 1440, 8)
     expect(outputs.find((output) => output.id === 'dayArbor')?.targetRpm).toBeCloseTo(1 / 10080, 10)
   })
 

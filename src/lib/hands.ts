@@ -21,7 +21,7 @@ export function getCurrentTimeHandAngles(now = new Date()): HandAngles {
   const seconds = now.getSeconds() + now.getMilliseconds() / 1000
   const minutes = now.getMinutes() + seconds / 60
   const hours = (now.getHours() % 12) + minutes / 60
-  const amPmHours = now.getHours() + minutes / 60
+  const amPmHours = (now.getHours() + 12) % 24 + minutes / 60
   const dayFraction =
     now.getDay() +
     (now.getHours() + now.getMinutes() / 60 + seconds / 3600) / 24
@@ -30,8 +30,8 @@ export function getCurrentTimeHandAngles(now = new Date()): HandAngles {
     secondArbor: normalizeAngle((seconds / 60) * 360),
     minuteArbor: normalizeAngle((minutes / 60) * 360),
     hourArbor: normalizeAngle((hours / 12) * 360),
-    amPmArbor: normalizeAngle((amPmHours / 12) * 360),
-    dayArbor: normalizeAngle((dayFraction / 7) * 360),
+    amPmArbor: normalizeAngle((amPmHours / 24) * 360),
+    dayArbor: normalizeAngle(((dayFraction - 0.5) / 7) * 360),
   }
 }
 

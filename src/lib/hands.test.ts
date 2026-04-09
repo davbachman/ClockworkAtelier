@@ -31,8 +31,8 @@ describe('hands', () => {
     expect(angles.secondArbor).toBeCloseTo(180, 6)
     expect(angles.minuteArbor).toBeCloseTo(93, 6)
     expect(angles.hourArbor).toBeCloseTo(97.75, 6)
-    expect(angles.amPmArbor).toBeCloseTo(97.75, 6)
-    expect(angles.dayArbor).toBeCloseTo(6.9821, 4)
+    expect(angles.amPmArbor).toBeCloseTo(228.875, 6)
+    expect(angles.dayArbor).toBeCloseTo(341.2679, 4)
   })
 
   it('adds simulated rotation on top of the base hand angle while playing', () => {

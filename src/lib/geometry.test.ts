@@ -112,6 +112,32 @@ describe('geometry', () => {
     expect(result.highlightedAnchors).toEqual(['amPmArbor'])
   })
 
+  it('allows a gear to mesh with a gear centered on an arbor regardless of size', () => {
+    const centeredGear = {
+      id: 'gear-1',
+      teeth: 10,
+      layerId: 'layer-3',
+      center: WORKSPACE_CENTER,
+    }
+    const targetDistance = getPitchRadius(10) + getPitchRadius(100)
+
+    const result = resolvePlacement({
+      mode: 'clock',
+      draftGear: {
+        teeth: 100,
+        layerId: 'layer-3',
+        center: { x: 12, y: -170 },
+      },
+      gears: [centeredGear],
+      layers: BASE_LAYERS,
+    })
+
+    expect(result.state).toBe('meshSnap')
+    expect(Math.hypot(result.center.x, result.center.y)).toBeCloseTo(targetDistance, 4)
+    expect(result.highlightedGearIds).toEqual(['gear-1'])
+    expect(result.highlightedAnchors).toEqual([])
+  })
+
   it('allows an orrery layer to snap into its own center arbor', () => {
     const result = resolvePlacement({
       mode: 'orrery',
