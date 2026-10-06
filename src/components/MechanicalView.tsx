@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { createMechanicalGear, createMechanicalModel, disposeObject, gearHeight, setClockLayerFocus } from '../lib/mechanicalScene'
 import type { MechanicalModel } from '../lib/mechanicalScene'
+import { fitMechanicalCamera } from '../lib/mechanicalCamera'
 import { getAnimatedAngle } from '../lib/hands'
 import { gearsMesh, getMeshingRotation } from '../lib/gearPhases'
 import { resolvePlacement, getOuterRadius } from '../lib/geometry'
@@ -24,7 +25,7 @@ interface Props {
 
 interface Runtime {
   scene: THREE.Scene
-  camera: THREE.OrthographicCamera
+  camera: THREE.PerspectiveCamera
   renderer: THREE.WebGLRenderer
   controls: OrbitControls
   model: MechanicalModel | null
@@ -112,14 +113,12 @@ export default function MechanicalView(props: Props) {
     const scene = new THREE.Scene()
     const dark = mode === 'orrery'
     scene.background = new THREE.Color(dark ? 0x10151d : 0xf1eadc)
-    const camera = new THREE.OrthographicCamera(-600, 600, 450, -450, 1, 10000)
+    const camera = new THREE.PerspectiveCamera(40, 1, 1, 10000)
     camera.up.set(0, 0, 1)
     const controls = new OrbitControls(camera, canvas)
     controls.enableDamping = false
     controls.minPolarAngle = 0.05
     controls.maxPolarAngle = Math.PI / 2 - 0.12
-    controls.minZoom = 0.3
-    controls.maxZoom = 5
     controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }
     controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN }
     scene.add(new THREE.HemisphereLight(0xeaf2ff, dark ? 0x3c3b37 : 0x9c9073, 1.8))
@@ -156,7 +155,7 @@ export default function MechanicalView(props: Props) {
     scene.add(grid)
 
     const fit = () => {
-      const { gears: currentGears } = latest()
+      const { gears: currentGears, layers: currentLayers, outputs: currentOutputs } = latest()
       let left = -380, right = 380, top = -380, bottom = 380
       left = Math.min(left, MOTOR_CENTER.x - 35)
       for (const gear of currentGears) {
@@ -164,22 +163,26 @@ export default function MechanicalView(props: Props) {
         left = Math.min(left, gear.center.x - radius); right = Math.max(right, gear.center.x + radius)
         top = Math.min(top, gear.center.y - radius); bottom = Math.max(bottom, gear.center.y + radius)
       }
-      const center = new THREE.Vector3((left + right) / 2, -(top + bottom) / 2, 55)
+      for (const output of currentOutputs) {
+        if (!output.orbitRadius) continue
+        const radius = output.orbitRadius + 40
+        left = Math.min(left, output.center.x - radius); right = Math.max(right, output.center.x + radius)
+        top = Math.min(top, output.center.y - radius); bottom = Math.max(bottom, output.center.y + radius)
+      }
+      const height = Math.max(12, ...currentLayers.map((layer) => gearHeight(layer.order))) + 80
+      const { center, distance } = fitMechanicalCamera(camera, new THREE.Box3(
+        new THREE.Vector3(left, -bottom, 0), new THREE.Vector3(right, -top, height),
+      ))
       controls.target.copy(center)
-      camera.position.copy(center).add(new THREE.Vector3(0, -850, 1350))
-      camera.zoom = Math.min((camera.right - camera.left) / ((right - left) * 1.15),
-        (camera.top - camera.bottom) / ((bottom - top) * 1.1 + 100))
-      camera.updateProjectionMatrix()
+      controls.minDistance = distance / 5
+      controls.maxDistance = distance / 0.3
       controls.update()
     }
     const resize = () => {
       const { width, height } = canvas.getBoundingClientRect()
       if (!width || !height) return
       renderer.setSize(width, height, false)
-      const aspect = width / height
-      camera.left = -450 * aspect; camera.right = 450 * aspect
-      camera.top = 450; camera.bottom = -450
-      camera.updateProjectionMatrix()
+      camera.aspect = width / height
       fit()
     }
     runtime.current = { scene, camera, renderer, controls, model: null, draft: null, draftTeeth: null, fit }
@@ -320,8 +323,11 @@ export default function MechanicalView(props: Props) {
   function zoom(factor: number) {
     const view = runtime.current
     if (!view) return
-    view.camera.zoom = THREE.MathUtils.clamp(view.camera.zoom * factor, 0.3, 5)
-    view.camera.updateProjectionMatrix()
+    const offset = view.camera.position.clone().sub(view.controls.target)
+    const distance = THREE.MathUtils.clamp(offset.length() / factor,
+      view.controls.minDistance, view.controls.maxDistance)
+    view.camera.position.copy(view.controls.target).add(offset.setLength(distance))
+    view.controls.update()
   }
 
   return <div className="mechanical-view">
