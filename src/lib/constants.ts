@@ -16,6 +16,15 @@ export const MOTOR_AXLE_RADIUS = 12
 export const MIN_TEETH = 6
 export const MAX_TEETH = 240
 
+export const OPTIONAL_LAYER_IDS: Record<EditorMode, readonly string[]> = {
+  clock: ['layer-4', 'layer-5'],
+  orrery: ['layer-5', 'layer-6'],
+}
+
+export function isLayerVisible(mode: EditorMode, layerId: string, visibility: Record<string, boolean>) {
+  return !OPTIONAL_LAYER_IDS[mode].includes(layerId) || visibility[layerId] === true
+}
+
 export const WORKSPACE_CENTER: Point = { x: 0, y: 0 }
 export const CLOCK_CENTER = WORKSPACE_CENTER
 export const MOTOR_CENTER: Point = { x: -440, y: 280 }

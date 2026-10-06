@@ -39,6 +39,7 @@ interface CameraState {
 }
 
 export interface WorkspaceState {
+  optionalLayerVisibility: Record<string, boolean>
   layers: Layer[]
   gears: Gear[]
   activeLayerId: string | null
@@ -59,6 +60,7 @@ interface EditorState {
   workspaces: Record<EditorMode, WorkspaceState>
   undoStack: AtelierProjectV2[]
   setToothInput: (value: string) => void
+  setOptionalLayerVisible: (layerId: string, visible: boolean) => void
   switchMode: () => void
   toggleLayer: (layerId: string) => void
   addLayer: () => void
@@ -100,12 +102,13 @@ function createInitialCamera(mode: EditorMode): CameraState {
   }
 }
 
-function createWorkspaceData(mode: EditorMode, overrides?: Partial<Pick<WorkspaceState, 'layers' | 'gears' | 'camera'>>): WorkspaceState {
+function createWorkspaceData(mode: EditorMode, overrides?: Partial<Pick<WorkspaceState, 'layers' | 'gears' | 'camera' | 'optionalLayerVisibility'>>): WorkspaceState {
   const layers = overrides?.layers
     ? [...overrides.layers].sort((layerA, layerB) => layerA.order - layerB.order)
     : getModeConfig(mode).layers.map((layer) => ({ ...layer }))
 
   return {
+    optionalLayerVisibility: overrides?.optionalLayerVisibility ?? {},
     layers,
     gears: overrides?.gears ?? [],
     activeLayerId: layers[0]?.id ?? null,
@@ -195,7 +198,7 @@ function createUndoSnapshot(state: Pick<EditorState, 'activeMode' | 'workspaces'
 }
 
 function pushUndoSnapshot(state: EditorState) {
-  return [...state.undoStack, createUndoSnapshot(state)]
+  return [...state.undoStack.slice(-99), createUndoSnapshot(state)]
 }
 
 function restoreProjectSnapshot(project: AtelierProjectV2) {
@@ -210,6 +213,19 @@ function restoreProjectSnapshot(project: AtelierProjectV2) {
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   ...createBaseEditorData(),
+  setOptionalLayerVisible: (layerId, visible) => {
+    set((state) => ({
+      ...updateActiveWorkspace(state, (workspace) => ({
+        optionalLayerVisibility: { ...workspace.optionalLayerVisibility, [layerId]: visible },
+        activeLayerId: !visible && workspace.activeLayerId === layerId ? null : workspace.activeLayerId,
+        draftGear: null,
+        selectedGearId: null,
+        inspector: null,
+        planetDialog: null,
+      })),
+      undoStack: pushUndoSnapshot(state),
+    }))
+  },
   setToothInput: (value) => {
     set((state) =>
       updateActiveWorkspace(state, () => ({
@@ -253,6 +269,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   addLayer: () => {
     set((state) => {
+      if (!getModeConfig(state.activeMode).allowAddLayer) return state
       const nextState = updateActiveWorkspace(state, (workspace, mode) => {
         if (!getModeConfig(mode).allowAddLayer) {
           return workspace
@@ -310,7 +327,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           selectedGearId: null,
           notice: null,
         })),
-        undoStack: pushUndoSnapshot(state),
       },
     )
   },
@@ -338,6 +354,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   commitDraft: (center) => {
     set((state) => {
+      const draft = state.workspaces[state.activeMode].draftGear
+      if (!draft) return state
+      if (draft.originalCenter?.x === center.x && draft.originalCenter.y === center.y) {
+        return updateActiveWorkspace(state, () => ({ draftGear: null }))
+      }
       const nextState = updateActiveWorkspace(state, (workspace) => {
         if (!workspace.draftGear) {
           return workspace
@@ -420,6 +441,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   deleteSelection: () => {
     set((state) => {
+      if (!state.workspaces[state.activeMode].selectedGearId) return state
       const nextState = updateActiveWorkspace(state, (workspace) => {
         if (!workspace.selectedGearId) {
           return workspace
@@ -467,9 +489,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             }
           : {
               isPlaying: true,
-              playbackMs: 0,
+              playbackMs: workspace.playbackMs,
               baseAngles:
-                mode === 'clock'
+                mode === 'clock' && workspace.playbackMs === 0
                   ? getCurrentTimeHandAngles(now)
                   : workspace.baseAngles,
               inspector: null,
@@ -564,21 +586,7 @@ export function resetEditorStore() {
 
 export function getEditorProjectSnapshot() {
   const state = useEditorStore.getState()
-
-  return {
-    version: 2 as const,
-    activeMode: state.activeMode,
-    clock: {
-      layers: state.workspaces.clock.layers,
-      gears: state.workspaces.clock.gears,
-      camera: state.workspaces.clock.camera,
-    },
-    orrery: {
-      layers: state.workspaces.orrery.layers,
-      gears: state.workspaces.orrery.gears,
-      camera: state.workspaces.orrery.camera,
-    },
-  }
+  return buildProjectSnapshot(state.activeMode, state.workspaces)
 }
 
 export function getDefaultPlacementPoint() {

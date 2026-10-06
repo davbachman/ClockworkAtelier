@@ -1,11 +1,16 @@
 import {
   startTransition,
+  lazy,
+  Suspense,
   useEffect,
   useEffectEvent,
   useId,
+  useMemo,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react'
+import { ZodError } from 'zod'
 import type {
   ChangeEvent,
   MouseEvent as ReactClickEvent,
@@ -21,14 +26,15 @@ import {
   MIN_TEETH,
   MOTOR_AXLE_RADIUS,
   MOTOR_CENTER,
+  OPTIONAL_LAYER_IDS,
   ROMAN_NUMERALS,
   WEEKDAY_NAMES,
   WORLD_HEIGHT,
   WORLD_WIDTH,
   WORKSPACE_CENTER,
   getModeConfig,
-  getOutputForLayer,
   getOutputById,
+  isLayerVisible,
 } from '../lib/constants'
 import {
   addPoints,
@@ -75,39 +81,22 @@ const CLOCK_DAY_INNER_RING_RADIUS = 46
 const CLOCK_DAY_LABEL_RADIUS = 58
 const CLOCK_AM_PM_HAND_LENGTH = 56
 const CLOCK_DAY_HAND_LENGTH = 54
-const OPTIONAL_LAYER_IDS_BY_MODE = {
-  clock: ['layer-4', 'layer-5'],
-  orrery: ['layer-5', 'layer-6'],
-} as const
-const DEFAULT_OPTIONAL_LAYER_VISIBILITY = {
-  clock: {
-    'layer-4': false,
-    'layer-5': false,
-  },
-  orrery: {
-    'layer-5': false,
-    'layer-6': false,
-  },
-} as const
+const MechanicalView = lazy(() => import('./MechanicalView'))
 
 type TopbarMenu = 'mode' | 'extra' | 'file'
 
 const REPOSITORY_URL = 'https://github.com/davbachman/ClockworkAtelier'
 
 function isOptionalLayer(mode: EditorMode, layerId: string) {
-  return OPTIONAL_LAYER_IDS_BY_MODE[mode].includes(layerId as never)
+  return OPTIONAL_LAYER_IDS[mode].includes(layerId)
 }
 
 function getOptionalLayerVisibility(
-  visibilityByMode: typeof DEFAULT_OPTIONAL_LAYER_VISIBILITY,
+  visibilityByMode: Record<EditorMode, Record<string, boolean>>,
   mode: EditorMode,
   layerId: string,
 ) {
-  if (!isOptionalLayer(mode, layerId)) {
-    return true
-  }
-
-  return (visibilityByMode[mode] as Record<string, boolean>)[layerId] ?? false
+  return isLayerVisible(mode, layerId, visibilityByMode[mode])
 }
 
 function parseTeethInput(value: string) {
@@ -260,6 +249,11 @@ function createWorldPointFromClient(
     return null
   }
 
+  const matrix = svgElement.getScreenCTM?.()
+  if (matrix) {
+    const point = new DOMPoint(clientX, clientY).matrixTransform(matrix.inverse())
+    return { x: point.x, y: point.y }
+  }
   const minX = camera.panX - WORLD_WIDTH / 2
   const minY = camera.panY - WORLD_HEIGHT / 2
 
@@ -280,6 +274,11 @@ function createWorldDeltaFromClient(
     return { x: 0, y: 0 }
   }
 
+  const matrix = svgElement.getScreenCTM?.()
+  if (matrix) {
+    const inverse = matrix.inverse()
+    return { x: inverse.a * deltaX + inverse.c * deltaY, y: inverse.b * deltaX + inverse.d * deltaY }
+  }
   return {
     x: (deltaX / bounds.width) * WORLD_WIDTH,
     y: (deltaY / bounds.height) * WORLD_HEIGHT,
@@ -376,7 +375,6 @@ function GearGlyph({
   activeLayerOrder,
   computedState,
   playbackMs,
-  isPlaying,
   isSelected,
   isDraft,
   highlightState,
@@ -421,7 +419,7 @@ function GearGlyph({
   const rimRingPath = `${gearOutlinePath} ${createCirclePath(gear.center, rimInnerRadius)}`
   const gearHitRadius = (rootRadius + outerRadius) / 2
   const gearHitPath = createCirclePath(gear.center, gearHitRadius)
-  const angle = (computedState?.rpm ?? 0) * 360 * (isPlaying ? playbackMs / 60000 : 0)
+  const angle = (computedState?.rpm ?? 0) * 360 * playbackMs / 60000
 
   return (
     <g
@@ -540,6 +538,8 @@ export function ClockworkEditor() {
     closeOverlays,
     undo,
     importProject,
+    setNotice,
+    setOptionalLayerVisible,
   } = useEditorStore()
 
   const workspace = workspaces[activeMode]
@@ -556,14 +556,17 @@ export function ClockworkEditor() {
     camera,
     inspector,
     planetDialog,
+    notice,
   } = workspace
   const modeConfig = getModeConfig(activeMode)
 
   const [isPanning, setIsPanning] = useState(false)
   const [openMenu, setOpenMenu] = useState<TopbarMenu | null>(null)
-  const [optionalLayerVisibilityByMode, setOptionalLayerVisibilityByMode] = useState(
-    DEFAULT_OPTIONAL_LAYER_VISIBILITY,
-  )
+  const [view, setView] = useState<'flat' | '3d'>('flat')
+  const optionalLayerVisibilityByMode = {
+    clock: workspaces.clock.optionalLayerVisibility,
+    orrery: workspaces.orrery.optionalLayerVisibility,
+  }
   const svgRef = useRef<SVGSVGElement | null>(null)
   const topbarRef = useRef<HTMLElement | null>(null)
   const dialMaskId = useId().replace(/:/g, '-')
@@ -593,28 +596,24 @@ export function ClockworkEditor() {
   const draftGearRef = useRef(draftGear)
 
   const sortedLayers = [...layers].sort((layerA, layerB) => layerA.order - layerB.order)
-  const visibleLayers =
-    activeMode === 'clock' || activeMode === 'orrery'
-      ? layers.filter(
-          (layer) =>
-            getOptionalLayerVisibility(optionalLayerVisibilityByMode, activeMode, layer.id),
-        )
-      : layers
+  const visibility = workspace.optionalLayerVisibility
+  const visibleLayers = useMemo(() => layers.filter((layer) =>
+    isLayerVisible(activeMode, layer.id, visibility),
+  ), [layers, activeMode, visibility])
   const visibleLayerIds = visibleLayers.map((layer) => layer.id)
   const visibleLayerIdSet = new Set(visibleLayerIds)
-  const visibleOutputs =
+  const visibleOutputs = useMemo(() =>
     modeConfig.outputs.filter((output) =>
       visibleLayers.some((layer) => layer.order === output.layerOrder),
-    )
+    ), [modeConfig.outputs, visibleLayers])
   const visibleOutputIds = visibleOutputs.map((output) => output.id)
   const visibleOutputIdSet = new Set(visibleOutputIds)
   const visibleOutputsByLayerOrder = new Map(
     visibleOutputs.map((output) => [output.layerOrder, output] as const),
   )
-  const visibleGears =
-    activeMode === 'orrery'
-      ? gears.filter((gear) => visibleLayerIdSet.has(gear.layerId))
-      : gears
+  const visibleGears = useMemo(() => gears.filter((gear) =>
+    visibleLayers.some((layer) => layer.id === gear.layerId),
+  ), [gears, visibleLayers])
   const extraLayers = sortedLayers.filter((layer) => isOptionalLayer(activeMode, layer.id))
   const sidebarLayers = sortedLayers.filter(
     (layer) =>
@@ -684,7 +683,8 @@ export function ClockworkEditor() {
           layers: visibleLayers,
           excludeGearId: draftGear.gearId,
         })
-  const analysis = analyzeClockwork(activeMode, visibleGears, visibleLayers, visibleOutputs)
+  const analysis = useMemo(() => analyzeClockwork(activeMode, visibleGears, visibleLayers, visibleOutputs),
+    [activeMode, visibleGears, visibleLayers, visibleOutputs])
   const parsedTeeth = parseTeethInput(toothInput)
   const canCreateGear = activeLayerId !== null && visibleLayerIdSet.has(activeLayerId) && parsedTeeth !== null
   const inspectorGear =
@@ -696,8 +696,10 @@ export function ClockworkEditor() {
       ? getOutputById(activeMode, planetDialog.outputId as Exclude<AnchorId, 'motor'>)
       : null
 
-  placementResultRef.current = placementResult
-  draftGearRef.current = draftGear
+  useLayoutEffect(() => {
+    placementResultRef.current = placementResult
+    draftGearRef.current = draftGear
+  }, [placementResult, draftGear])
 
   const commitPlacementIfValid = useEffectEvent(() => {
     if (!draftGearRef.current || !placementResultRef.current) {
@@ -737,7 +739,7 @@ export function ClockworkEditor() {
         return
       }
 
-      if (draftGearRef.current?.mode === 'moving') {
+      if (draftGearRef.current) {
         cancelDraft()
       } else if (planetDialog) {
         closePlanetDialog()
@@ -883,6 +885,7 @@ export function ClockworkEditor() {
   })
 
   const handlePointerUp = useEffectEvent((event: PointerEvent) => {
+    if (view !== 'flat') return
     if (panInteractionRef.current?.pointerId === event.pointerId) {
       const panInteraction = panInteractionRef.current
       panInteractionRef.current = null
@@ -962,7 +965,7 @@ export function ClockworkEditor() {
     }
 
     let frameId = 0
-    const startAt = performance.now() - playbackMs
+    const startAt = performance.now() - useEditorStore.getState().workspaces[activeMode].playbackMs
 
     const tick = (timestamp: number) => {
       updatePlayback(timestamp - startAt)
@@ -971,7 +974,7 @@ export function ClockworkEditor() {
 
     frameId = window.requestAnimationFrame(tick)
     return () => window.cancelAnimationFrame(frameId)
-  }, [isPlaying, playbackMs])
+  }, [isPlaying, activeMode])
 
   async function handleImportFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -985,25 +988,15 @@ export function ClockworkEditor() {
         importProject(project)
       })
     } catch (error) {
-      console.error(error instanceof Error ? error.message : 'Unable to import project.')
+      const detail = error instanceof ZodError ? error.issues[0]?.message : 'Invalid JSON file.'
+      setNotice({ message: `Unable to import project. ${detail}`, variant: 'error' })
     } finally {
       event.target.value = ''
     }
   }
 
   async function handleSave() {
-    const project = buildProjectSnapshot(activeMode, {
-      clock: {
-        layers: workspaces.clock.layers,
-        gears: workspaces.clock.gears,
-        camera: workspaces.clock.camera,
-      },
-      orrery: {
-        layers: workspaces.orrery.layers,
-        gears: workspaces.orrery.gears,
-        camera: workspaces.orrery.camera,
-      },
-    })
+    const project = buildProjectSnapshot(activeMode, workspaces)
     const serializedProject = serializeProject(project)
     const windowWithPicker = window as Window & {
       showSaveFilePicker?: (options?: {
@@ -1033,6 +1026,7 @@ export function ClockworkEditor() {
         const writable = await fileHandle.createWritable()
         await writable.write(serializedProject)
         await writable.close()
+        setNotice({ message: 'Project saved.', variant: 'success' })
         return
       }
     } catch (error) {
@@ -1040,7 +1034,7 @@ export function ClockworkEditor() {
         return
       }
 
-      console.error(error instanceof Error ? error.message : 'Unable to save project.')
+      setNotice({ message: 'Unable to save project. Please try again.', variant: 'error' })
       return
     }
 
@@ -1050,7 +1044,8 @@ export function ClockworkEditor() {
     anchor.href = url
     anchor.download = 'atelier-project.json'
     anchor.click()
-    URL.revokeObjectURL(url)
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    setNotice({ message: 'Project downloaded.', variant: 'success' })
   }
 
   function handleModeSelect(nextMode: EditorMode) {
@@ -1218,30 +1213,8 @@ export function ClockworkEditor() {
       return
     }
 
-    setOptionalLayerVisibilityByMode((current) => ({
-      ...current,
-      [activeMode]: {
-        ...current[activeMode],
-        [layer.id]: checked,
-      },
-    }))
+    setOptionalLayerVisible(layer.id, checked)
 
-    if (checked) {
-      return
-    }
-
-    if (draftGear?.layerId === layer.id) {
-      cancelDraft()
-    }
-
-    if (activeLayerId === layer.id) {
-      toggleLayer(layer.id)
-    }
-
-    const output = getOutputForLayer(activeMode, layer.order)
-    if (activeMode === 'orrery' && planetDialog && output && planetDialog.outputId === output.id) {
-      closePlanetDialog()
-    }
   }
 
   function getGearHighlightState(gearId: string) {
@@ -1305,7 +1278,7 @@ export function ClockworkEditor() {
         stroke="var(--ink)"
         strokeWidth={strokeWidth}
         strokeLinecap="round"
-        transform={`rotate(${getAnimatedAngle(baseAngles[output.id] ?? 0, analysis.outputStates[output.id]?.rpm ?? null, playbackMs, isPlaying)} ${output.center.x} ${output.center.y})`}
+        transform={`rotate(${getAnimatedAngle(baseAngles[output.id] ?? 0, analysis.outputStates[output.id]?.rpm ?? null, playbackMs)} ${output.center.x} ${output.center.y})`}
       />
     )
   }
@@ -1468,7 +1441,6 @@ export function ClockworkEditor() {
             baseAngles[output.id] ?? 0,
             analysis.outputStates[output.id]?.rpm ?? null,
             playbackMs,
-            isPlaying,
           )
           const point = getPointOnOrbit(output.orbitRadius ?? 0, angleDegrees)
           const size = PLANET_SIZES[output.assetId ?? 'earth'] ?? 76
@@ -1627,6 +1599,14 @@ export function ClockworkEditor() {
             ) : null}
           </div>
         </div>
+        <div className="view-switch" role="group" aria-label="Workspace view">
+          {(['flat', '3d'] as const).map((option) => (
+            <button key={option} type="button" aria-pressed={view === option}
+              onClick={() => { cancelDraft(); closeOverlays(); setView(option) }}>
+              {option === 'flat' ? 'Flat' : '3D'}
+            </button>
+          ))}
+        </div>
       </header>
 
       <section className="workspace-panel">
@@ -1678,7 +1658,13 @@ export function ClockworkEditor() {
             </div>
           ) : null}
 
-          <svg
+          {view === '3d' ? (
+            <Suspense fallback={<div className="view-loading" role="status">Loading 3D view...</div>}>
+              <MechanicalView mode={activeMode} gears={visibleGears} layers={visibleLayers}
+                outputs={visibleOutputs} analysis={analysis} workspace={workspace}
+                onFallback={() => setView('flat')} />
+            </Suspense>
+          ) : <svg
             ref={svgRef}
             className="workspace-svg"
             data-panning={isPanning}
@@ -2086,11 +2072,13 @@ export function ClockworkEditor() {
                 {showOrreryOverlay ? renderSunGlyph() : null}
               </g>
             )}
-          </svg>
+          </svg>}
         </div>
       </section>
 
       <aside className="sidebar">
+        {notice ? <div className="notice" data-variant={notice.variant}
+          role={notice.variant === 'error' ? 'alert' : 'status'}>{notice.message}</div> : null}
         <button
           className="play-button"
           data-active={isPlaying}

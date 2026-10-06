@@ -12,6 +12,8 @@ Clockwork Atelier is a browser-based workshop for designing layered gear trains 
 
 You can place and move gears, inspect rates, toggle optional extra layers, animate the mechanism, and save or reload projects as JSON.
 
+The `Flat` / `3D` control switches between the original schematic and a sculptural view with extruded gears, separated layers, and engraved planet faces. Both views use the same mechanism and simulation.
+
 ## Instructions for use
 Use the top menu bar:
 
@@ -24,6 +26,8 @@ Use the top menu bar:
 - `Extra`:
   In `Clockwork`, toggle the optional `AM/PM` and `Day` layers.
   In `Orrery`, toggle the optional `Jupiter` and `Saturn` layers.
+
+Extra-layer choices are included in saved projects. Older project files still import; optional layers containing gears are enabled automatically.
 
 Use the right sidebar:
 
@@ -48,4 +52,12 @@ Interaction notes:
 - `Cmd+Z` or `Ctrl+Z` undoes editor actions.
 - Right-click and drag pans the canvas.
 
+In 3D, drag gears on the active layer to move them and click a gear to inspect it. Drag empty space to pan; right-drag rotates the camera. The orbit button also enables left-drag or one-finger rotation. Use the wheel, pinch gesture, or zoom buttons to zoom, and the fit button to return to the initial angle with the mechanism in view. Pause freezes the mechanism; Play resumes it.
+
+The 3D renderer loads only when selected and requires WebGL2. If graphics support is unavailable, return to Flat without losing the current mechanism.
+
 The app starts centered on the main clock arbor, and the canvas is constrained to the viewport while the sidebar scrolls independently.
+
+## Development checks
+
+Run `npm test`, `npm run lint`, `npm run build`, and `npm run test:e2e`. Install the browser for the latter with `npx playwright install chromium`. The Pages workflow runs all four checks before publishing.

@@ -419,7 +419,7 @@
 
 .inspector,
 .planet-dialog {
-  position: absolute;
+  position: fixed;
   z-index: 3;
   min-width: 13rem;
   padding: 0.85rem 0.95rem;
@@ -485,7 +485,7 @@
 @media (max-width: 1100px) {
   .app-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto;
+    grid-template-rows: auto minmax(180px, 1fr) minmax(0, 17rem);
   }
 
   .workspace-panel {
@@ -494,12 +494,88 @@
   }
 
   .workspace-svg {
-    height: min(72svh, 44rem);
+    height: 100%;
   }
 
   .editor-topbar {
     padding: 0.5rem 0.75rem;
+    flex-wrap: wrap;
   }
+}
+
+.view-switch {
+  display: flex;
+  margin-left: auto;
+  border: 1px solid var(--ink-faint);
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.view-switch button {
+  border: 0;
+  background: var(--button-bg);
+  color: var(--ink);
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.view-switch button[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.view-switch button:focus-visible,
+.scene-tools button:focus-visible {
+  outline: 2px solid var(--signal-good);
+  outline-offset: -3px;
+}
+
+.mechanical-view,
+.mechanical-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  touch-action: none;
+}
+
+.mechanical-canvas { display: block; }
+
+.scene-tools {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  display: flex;
+  gap: 0.4rem;
+  z-index: 2;
+}
+
+.scene-tools button {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ink-faint);
+  border-radius: 6px;
+  background: var(--overlay-bg);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.scene-tools button[aria-pressed='true'] {
+  color: var(--paper);
+  background: var(--ink);
+}
+
+.view-loading, .view-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 1rem;
+  padding: 2rem;
+  text-align: center;
 }
 
 @media (max-width: 720px) {

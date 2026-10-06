@@ -39,9 +39,8 @@ export function getAnimatedAngle(
   baseAngle: number,
   rpm: number | null,
   playbackMs: number,
-  isPlaying: boolean,
 ) {
-  if (!isPlaying || rpm === null) {
+  if (rpm === null) {
     return normalizeAngle(baseAngle)
   }
 
@@ -52,7 +51,6 @@ export function getAnimatedHandAngle(
   baseAngle: number,
   rpm: number | null,
   playbackMs: number,
-  isPlaying: boolean,
 ) {
-  return getAnimatedAngle(baseAngle, rpm, playbackMs, isPlaying)
+  return getAnimatedAngle(baseAngle, rpm, playbackMs)
 }

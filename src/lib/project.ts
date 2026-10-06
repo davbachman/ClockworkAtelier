@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { MAX_TEETH, MIN_TEETH, MODE_CONFIGS } from './constants'
+import { MAX_TEETH, MIN_TEETH, MODE_CONFIGS, OPTIONAL_LAYER_IDS } from './constants'
 import type {
   AtelierProjectV2,
   ClockworkProjectV1,
@@ -31,6 +31,7 @@ const workspaceSliceSchema = z
   .object({
     layers: z.array(layerSchema).min(1),
     gears: z.array(gearSchema),
+    optionalLayerVisibility: z.record(z.string(), z.boolean()).optional(),
     camera: z.object({
       panX: z.number().finite(),
       panY: z.number().finite(),
@@ -59,7 +60,12 @@ const workspaceSliceSchema = z
       layerOrders.add(layer.order)
     }
 
+    const gearIds = new Set<string>()
     for (const gear of project.gears) {
+      if (gearIds.has(gear.id)) {
+        context.addIssue({ code: 'custom', message: `Duplicate gear id: ${gear.id}` })
+      }
+      gearIds.add(gear.id)
       if (!layerIds.has(gear.layerId)) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
@@ -69,7 +75,7 @@ const workspaceSliceSchema = z
     }
   })
 
-const clockworkProjectV1Schema = workspaceSliceSchema.extend({
+const clockworkProjectV1Schema = workspaceSliceSchema.safeExtend({
   version: z.literal(1),
 })
 
@@ -99,11 +105,16 @@ function normalizeWorkspaceSlice(
   layers: Layer[],
   gears: Gear[],
   camera: WorkspaceProjectSlice['camera'],
+  optionalLayerVisibility?: Record<string, boolean>,
+  mode: EditorMode = 'clock',
 ): WorkspaceProjectSlice {
   return {
     layers: [...layers].sort((layerA, layerB) => layerA.order - layerB.order),
     gears,
     camera,
+    optionalLayerVisibility: optionalLayerVisibility ?? Object.fromEntries(
+      OPTIONAL_LAYER_IDS[mode].map((id) => [id, gears.some((gear) => gear.layerId === id)]),
+    ),
   }
 }
 
@@ -124,11 +135,13 @@ export function parseProjectJson(text: string) {
   return {
     version: 2,
     activeMode: project.activeMode,
-    clock: normalizeWorkspaceSlice(project.clock.layers, project.clock.gears, project.clock.camera),
+    clock: normalizeWorkspaceSlice(project.clock.layers, project.clock.gears, project.clock.camera, project.clock.optionalLayerVisibility),
     orrery: normalizeWorkspaceSlice(
       project.orrery.layers,
       project.orrery.gears,
       project.orrery.camera,
+      project.orrery.optionalLayerVisibility,
+      'orrery',
     ),
   } satisfies AtelierProjectV2
 }
@@ -148,11 +161,14 @@ export function buildProjectSnapshot(
       workspaces.clock.layers,
       workspaces.clock.gears,
       workspaces.clock.camera,
+      workspaces.clock.optionalLayerVisibility,
     ),
     orrery: normalizeWorkspaceSlice(
       workspaces.orrery.layers,
       workspaces.orrery.gears,
       workspaces.orrery.camera,
+      workspaces.orrery.optionalLayerVisibility,
+      'orrery',
     ),
   }
 }

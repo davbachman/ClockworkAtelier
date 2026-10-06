@@ -23,8 +23,8 @@ describe('editorStore', () => {
     expect(state.workspaces.clock.baseAngles.secondArbor).toBeCloseTo(180, 6)
     expect(state.workspaces.clock.baseAngles.minuteArbor).toBeCloseTo(93, 6)
     expect(state.workspaces.clock.baseAngles.hourArbor).toBeCloseTo(97.75, 6)
-    expect(state.workspaces.clock.baseAngles.amPmArbor).toBeCloseTo(97.75, 6)
-    expect(state.workspaces.clock.baseAngles.dayArbor).toBeCloseTo(6.9821, 4)
+    expect(state.workspaces.clock.baseAngles.amPmArbor).toBeCloseTo(228.875, 6)
+    expect(state.workspaces.clock.baseAngles.dayArbor).toBeCloseTo(341.2679, 4)
   })
 
   it('starts with the clock camera centered on the main hand arbor', () => {
@@ -34,6 +34,44 @@ describe('editorStore', () => {
       panX: WORKSPACE_CENTER.x,
       panY: WORKSPACE_CENTER.y,
     })
+  })
+
+  it('resumes both modes at the paused time without changing base angles', () => {
+    for (const mode of ['clock', 'orrery'] as const) {
+      if (mode === 'orrery') useEditorStore.getState().switchMode()
+      useEditorStore.getState().togglePlay()
+      useEditorStore.getState().setPlaybackMs(12000)
+      const angles = useEditorStore.getState().workspaces[mode].baseAngles
+      useEditorStore.getState().togglePlay()
+      vi.advanceTimersByTime(30000)
+      useEditorStore.getState().togglePlay()
+      expect(useEditorStore.getState().workspaces[mode].playbackMs).toBe(12000)
+      expect(useEditorStore.getState().workspaces[mode].baseAngles).toEqual(angles)
+    }
+  })
+
+  it('undoes one completed placement per step and ignores cancelled drafts', () => {
+    const store = () => useEditorStore.getState()
+    store().setToothInput('24')
+    for (const x of [500, 600]) {
+      store().startPlacement({ x, y: 0 })
+      store().commitDraft({ x, y: 0 })
+    }
+    store().startPlacement({ x: 700, y: 0 })
+    store().cancelDraft()
+    store().deleteSelection()
+    expect(store().undoStack).toHaveLength(2)
+    store().undo()
+    expect(store().workspaces.clock.gears).toHaveLength(1)
+    store().undo()
+    expect(store().workspaces.clock.gears).toHaveLength(0)
+  })
+
+  it('restores optional-layer choices through undo and import', () => {
+    useEditorStore.getState().setOptionalLayerVisible('layer-4', true)
+    useEditorStore.getState().setOptionalLayerVisible('layer-4', false)
+    useEditorStore.getState().undo()
+    expect(useEditorStore.getState().workspaces.clock.optionalLayerVisibility['layer-4']).toBe(true)
   })
 
   it('switches modes while preserving workspace builds and clearing transient UI state', () => {

@@ -32,14 +32,21 @@ async function importProject(page: Page, projectPath: string) {
   await expect(page.getByText('Project imported.')).toBeVisible()
 }
 
+async function switchMode(page: Page, mode: 'clock' | 'orrery') {
+  await page.getByTestId('menu-trigger-mode').click()
+  await page.getByTestId(`menu-item-mode-${mode}`).click()
+}
+
 test('shows the optional clock complications when their checkboxes are enabled', async ({ page }) => {
   await page.goto('/')
 
   await expect(page.getByTestId('am-pm-dial')).toHaveCount(0)
   await expect(page.getByTestId('day-dial')).toHaveCount(0)
 
-  await page.getByTestId('layer-checkbox-4').check()
-  await page.getByTestId('layer-checkbox-5').check()
+  await page.getByTestId('menu-trigger-extra').click()
+  await page.getByTestId('menu-item-extra-4').click()
+  await page.getByTestId('menu-trigger-extra').click()
+  await page.getByTestId('menu-item-extra-5').click()
 
   await expect(page.getByTestId('am-pm-dial')).toBeVisible()
   await expect(page.getByTestId('am-pm-hand')).toBeVisible()
@@ -63,8 +70,8 @@ test('preserves separate clock and orrery builds when switching modes', async ({
   })
   await expect(page.getByTestId('gear-gear-1')).toBeVisible()
 
-  await page.getByTestId('mode-toggle').click()
-  await expect(page.getByTestId('mode-toggle')).toContainText('Orrery Atelier')
+  await switchMode(page, 'orrery')
+  await expect(page.getByTestId('mode-title')).toContainText('Orrery Atelier')
   await page.getByTestId('tooth-input').fill('24')
   await expect(page.getByTestId('planet-earthArbor')).toBeVisible()
 
@@ -74,19 +81,19 @@ test('preserves separate clock and orrery builds when switching modes', async ({
   })
   await expect(page.getByTestId('gear-gear-1')).toBeVisible()
 
-  await page.getByTestId('mode-toggle').click()
-  await expect(page.getByTestId('mode-toggle')).toContainText('Clockwork Atelier')
+  await switchMode(page, 'clock')
+  await expect(page.getByTestId('mode-title')).toContainText('Clockwork Atelier')
   await expect(page.getByTestId('dial-ring-fill')).toBeVisible()
   await expect(page.getByTestId('gear-gear-1')).toBeVisible()
 
-  await page.getByTestId('mode-toggle').click()
+  await switchMode(page, 'orrery')
   await expect(page.getByTestId('planet-earthArbor')).toBeVisible()
   await expect(page.getByTestId('gear-gear-1')).toBeVisible()
 })
 
 test('only opens planet dialogs from the no-selection overview while empty-canvas right drag still pans', async ({ page }) => {
   await page.goto('/')
-  await page.getByTestId('mode-toggle').click()
+  await switchMode(page, 'orrery')
 
   await expect(page.getByTestId('planet-earthArbor')).toBeVisible()
   const earthPlanet = page.getByTestId('planet-earthArbor')
@@ -127,7 +134,7 @@ test('shows working and wrong orrery badges for imported Earth trains', async ({
   await page.goto('/')
 
   await importProject(page, workingOrreryProjectPath)
-  await expect(page.getByTestId('mode-toggle')).toContainText('Orrery Atelier')
+  await expect(page.getByTestId('mode-title')).toContainText('Orrery Atelier')
   await expect(page.getByTestId('clock-status')).toContainText('WORKING ORRERY!')
 
   await importProject(page, wrongOrreryProjectPath)

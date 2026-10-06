@@ -80,14 +80,18 @@ export function getLayerVisualState(layerOrder: number, activeLayerOrder: number
   return layerOrder > activeLayerOrder ? 'above' : 'below'
 }
 
+const ROOT_FLAT_FRACTION = 0.28
+const TIP_FLAT_FRACTION = 0.24
+export const GEAR_TOOTH_CENTER_FRACTION = (1 + ROOT_FLAT_FRACTION) / 2
+
 export function createGearPath(center: Point, teeth: number) {
   const safeTeeth = clampTeethCount(teeth)
   const rootRadius = getRootRadius(safeTeeth)
   const outerRadius = getOuterRadius(safeTeeth)
   const points: string[] = []
   const toothAngle = (Math.PI * 2) / safeTeeth
-  const rootFlatFraction = 0.28
-  const tipFlatFraction = 0.24
+  const rootFlatFraction = ROOT_FLAT_FRACTION
+  const tipFlatFraction = TIP_FLAT_FRACTION
   const flankFraction = (1 - rootFlatFraction - tipFlatFraction) / 2
 
   for (let toothIndex = 0; toothIndex < safeTeeth; toothIndex += 1) {

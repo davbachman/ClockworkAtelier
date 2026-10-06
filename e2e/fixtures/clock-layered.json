@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "activeMode": "clock",
+  "clock": {
+    "layers": [
+      { "id": "layer-1", "name": "Second Hand Layer", "order": 1 },
+      { "id": "layer-2", "name": "Minute Hand Layer", "order": 2 },
+      { "id": "layer-3", "name": "Hour Hand Layer", "order": 3 },
+      { "id": "layer-4", "name": "AM/PM", "order": 4 },
+      { "id": "layer-5", "name": "Day", "order": 5 }
+    ],
+    "gears": [
+      { "id": "gear-1", "teeth": 100, "layerId": "layer-1", "center": { "x": -440, "y": 280 } },
+      { "id": "gear-2", "teeth": 82, "layerId": "layer-1", "center": { "x": -220, "y": 140 } },
+      { "id": "gear-3", "teeth": 100, "layerId": "layer-1", "center": { "x": 0, "y": 0 } },
+      { "id": "gear-4", "teeth": 24, "layerId": "layer-2", "center": { "x": -220, "y": 140 } },
+      { "id": "gear-5", "teeth": 72, "layerId": "layer-2", "center": { "x": -220, "y": 2.490129 } },
+      { "id": "gear-6", "teeth": 36, "layerId": "layer-3", "center": { "x": -220, "y": 2.490129 } }
+    ],
+    "optionalLayerVisibility": { "layer-4": true, "layer-5": true },
+    "camera": { "panX": 0, "panY": 0 }
+  },
+  "orrery": {
+    "layers": [
+      { "id": "layer-1", "name": "Mercury", "order": 1 },
+      { "id": "layer-2", "name": "Venus", "order": 2 },
+      { "id": "layer-3", "name": "Earth", "order": 3 },
+      { "id": "layer-4", "name": "Mars", "order": 4 },
+      { "id": "layer-5", "name": "Jupiter", "order": 5 },
+      { "id": "layer-6", "name": "Saturn", "order": 6 }
+    ],
+    "gears": [],
+    "camera": { "panX": 0, "panY": 0 }
+  }
+}

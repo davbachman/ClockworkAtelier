@@ -36,8 +36,7 @@ describe('hands', () => {
   })
 
   it('adds simulated rotation on top of the base hand angle while playing', () => {
-    expect(getAnimatedHandAngle(90, 1, 15_000, true)).toBeCloseTo(180, 6)
-    expect(getAnimatedHandAngle(90, null, 15_000, true)).toBe(90)
-    expect(getAnimatedHandAngle(90, 1, 15_000, false)).toBe(90)
+    expect(getAnimatedHandAngle(90, 1, 15_000)).toBeCloseTo(180, 6)
+    expect(getAnimatedHandAngle(90, null, 15_000)).toBe(90)
   })
 })

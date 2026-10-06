@@ -138,6 +138,7 @@ export interface NoticeState {
 }
 
 export interface WorkspaceProjectSlice {
+  optionalLayerVisibility?: Record<string, boolean>
   layers: Array<{
     id: string
     name: string
