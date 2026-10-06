@@ -70,6 +70,8 @@ test('pause freezes flat gears and resumes their rotation', async ({ page }) => 
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test(`3D renders, animates, pauses and rotates at ${viewport.width}px`, async ({ page }) => {
+    // Software WebGL on CI needs more time for this two-mode rendering workflow.
+    test.setTimeout(60_000)
     await page.setViewportSize(viewport)
     const errors: string[] = []
     page.on('pageerror', (error) => errors.push(error.message))
