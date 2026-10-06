@@ -228,13 +228,16 @@ export function createMechanicalModel(mode: EditorMode, gears: Gear[], layers: L
     }
   }
   if (mode === 'orrery') {
+    const group = new THREE.Group()
+    group.name = 'sun'
     const sun = artwork(SUN_ART_ASSET, 140)
     sun.position.set(0, 0, tallest + 55)
     const backing = new THREE.Mesh(new THREE.CircleGeometry(52, 64), new THREE.MeshBasicMaterial({ color: 0x10151d }))
     backing.position.set(0, 0, tallest + 54)
-    model.root.add(backing)
-    model.root.add(sun)
-    axle(model.root, 0, 0, tallest + 43, 35)
+    group.add(backing, sun)
+    axle(group, 0, 0, tallest + 43, 35)
+    model.root.add(group)
+    model.layerElements.push({ object: group, layerIds: [] })
   }
   return model
 }
@@ -242,7 +245,7 @@ export function createMechanicalModel(mode: EditorMode, gears: Gear[], layers: L
 const materialAppearance = new WeakMap<THREE.Material, { opacity: number; transparent: boolean; depthWrite: boolean }>()
 const shadowAppearance = new WeakMap<THREE.Object3D, boolean>()
 
-export function setClockLayerFocus(model: MechanicalModel, activeLayerId: string | null) {
+export function setMechanicalLayerFocus(model: MechanicalModel, activeLayerId: string | null) {
   for (const { object, layerIds } of model.layerElements) {
     const faded = activeLayerId !== null && !layerIds.includes(activeLayerId)
     object.traverse((child) => {

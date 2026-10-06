@@ -2,7 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { Maximize, Orbit, ZoomIn, ZoomOut } from 'lucide-react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { createMechanicalGear, createMechanicalModel, disposeObject, gearHeight, setClockLayerFocus } from '../lib/mechanicalScene'
+import { createMechanicalGear, createMechanicalModel, disposeObject, gearHeight, setMechanicalLayerFocus } from '../lib/mechanicalScene'
 import type { MechanicalModel } from '../lib/mechanicalScene'
 import { fitMechanicalCamera } from '../lib/mechanicalCamera'
 import { getAnimatedAngle } from '../lib/hands'
@@ -310,7 +310,7 @@ export default function MechanicalView(props: Props) {
 
   useEffect(() => {
     const model = runtime.current?.model
-    if (mode === 'clock' && model) setClockLayerFocus(model, props.workspace.activeLayerId)
+    if (model) setMechanicalLayerFocus(model, props.workspace.activeLayerId)
   }, [mode, gears, layers, outputs, props.workspace.activeLayerId])
 
   useEffect(() => {

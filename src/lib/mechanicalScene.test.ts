@@ -1,6 +1,6 @@
 import * as THREE from 'three'
-import { CLOCK_LAYERS, CLOCK_OUTPUTS, DIAL_OUTER_RADIUS } from './constants'
-import { createMechanicalGear, createMechanicalModel, disposeObject, setClockLayerFocus } from './mechanicalScene'
+import { CLOCK_LAYERS, CLOCK_OUTPUTS, DIAL_OUTER_RADIUS, ORRERY_LAYERS, ORRERY_OUTPUTS } from './constants'
+import { createMechanicalGear, createMechanicalModel, disposeObject, setMechanicalLayerFocus } from './mechanicalScene'
 import type { MechanicalModel } from './mechanicalScene'
 import { getMeshingRotation } from './gearPhases'
 import { getPitchRadius } from './geometry'
@@ -109,7 +109,7 @@ describe('3D clock layers', () => {
     const surface = model.root.getObjectByName('clock-face')!.children[0] as THREE.Mesh
     const ray = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, 0, -1))
     for (const layer of [null, 'layer-1', 'layer-5', null]) {
-      setClockLayerFocus(model, layer)
+      setMechanicalLayerFocus(model, layer)
       for (const radius of [0, DIAL_OUTER_RADIUS * 0.5, DIAL_OUTER_RADIUS * 0.77]) {
         ray.ray.origin.set(radius, 0, 1000)
         expect(ray.intersectObject(surface, false)).toHaveLength(0)
@@ -120,7 +120,7 @@ describe('3D clock layers', () => {
   })
 
   it('fades unrelated parts, including shadows, and restores the overview', () => {
-    setClockLayerFocus(model, 'layer-1')
+    setMechanicalLayerFocus(model, 'layer-1')
     const unrelated = [model.gears.get('last')!, model.outputs.get('dayArbor')!, model.root.getObjectByName('clock-face')!, model.root.getObjectByName('dial-dayArbor')!]
     for (const object of unrelated) {
       for (const material of materials(object)) {
@@ -132,14 +132,56 @@ describe('3D clock layers', () => {
     }
     expect(materials(model.outputs.get('secondArbor')!)[0].opacity).toBe(1)
     expect(materials(model.gears.get('first')!)[0].opacity).toBe(1)
-    setClockLayerFocus(model, 'layer-5')
+    setMechanicalLayerFocus(model, 'layer-5')
     expect(materials(model.root.getObjectByName('dial-dayArbor')!)[0].opacity).toBe(1)
     expect(materials(model.outputs.get('dayArbor')!)[0].opacity).toBe(1)
-    setClockLayerFocus(model, null)
+    setMechanicalLayerFocus(model, null)
     const surface = model.root.getObjectByName('clock-face')!.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.Material>
     expect(surface.material.opacity).toBe(1)
     expect(surface.material.transparent).toBe(false)
     expect(surface.material.depthWrite).toBe(true)
     expect(surface.castShadow).toBe(true)
+  })
+})
+
+describe('3D orrery layers', () => {
+  it('fades unrelated gears, planets, arms, axles and the Sun, then restores their appearance', () => {
+    const model = createMechanicalModel('orrery', [
+      { id: 'mercury', layerId: 'layer-1', teeth: 40, center: { x: 0, y: 0 } },
+      { id: 'earth', layerId: 'layer-3', teeth: 40, center: { x: 0, y: 0 } },
+    ], ORRERY_LAYERS, ORRERY_OUTPUTS)
+    const originals = new Map<THREE.Material, { opacity: number; transparent: boolean; depthWrite: boolean }>()
+    const shadows = new Map<THREE.Object3D, boolean>()
+    model.root.traverse((child) => {
+      if (!(child instanceof THREE.Mesh || child instanceof THREE.Line)) return
+      shadows.set(child, child.castShadow)
+      for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+        originals.set(material, { opacity: material.opacity, transparent: material.transparent, depthWrite: material.depthWrite })
+      }
+    })
+    try {
+      expect(model.layerElements.find(({ object }) => object.name === 'sun')?.layerIds).toEqual([])
+      expect(model.layerElements.some(({ layerIds }) => layerIds.length === 2 && layerIds.includes('layer-3'))).toBe(true)
+      for (const active of ['layer-1', 'layer-3', 'layer-6', null]) {
+        setMechanicalLayerFocus(model, active)
+        for (const { object, layerIds } of model.layerElements) {
+          const faded = active !== null && !layerIds.includes(active)
+          object.traverse((child) => {
+            if (!(child instanceof THREE.Mesh || child instanceof THREE.Line)) return
+            expect(child.castShadow).toBe(faded ? false : shadows.get(child))
+            for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+              const original = originals.get(material)!
+              expect(material.opacity).toBeCloseTo(original.opacity * (faded ? 0.15 : 1))
+              expect(material.transparent).toBe(faded || original.transparent)
+              expect(material.depthWrite).toBe(faded ? false : original.depthWrite)
+            }
+          })
+        }
+      }
+      expect(originals.size).toBeGreaterThan(20)
+    } finally {
+      disposeObject(model.root)
+      model.textures.forEach((texture) => texture.dispose())
+    }
   })
 })
